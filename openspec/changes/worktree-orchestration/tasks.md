@@ -29,9 +29,9 @@
 
 ## Phase 0: Repo-level scaffolding (sequential, no RED/GREEN — no logic)
 
-- [ ] **0.1** Add `/platform/worktree-orchestrator/wt` to `.gitignore` (mirrors the `evidence` binary entry). No test needed — verified by `git status`. **REQ-ENV-5 (binary hygiene), design §13**
-- [ ] **0.2** Create `.env.example` at repo root with the exact content specified in REQ-ENV-5. File must include `PORT=8100`, `DB_SCHEMA=wt_<figura>`, `JIRA_EMAIL=`, `JIRA_API_TOKEN=`, `JIRA_SITE_URL=https://tablex.atlassian.net`, and the comment header. **REQ-ENV-5**
-- [ ] **0.3** Update `team-context/ownership.md`: (a) flip `module:devops` row status from `slot` → `active`, (b) add `platform/worktree-orchestrator/**` and `.env.example` entries to the shared-file map with owner `HERMES`. **REQ-OWNER-1**
+- [x] **0.1** Add `/platform/worktree-orchestrator/wt` to `.gitignore` (mirrors the `evidence` binary entry). No test needed — verified by `git status`. **REQ-ENV-5 (binary hygiene), design §13**
+- [ ] **0.2** Create `.env.example` at repo root with the exact content specified in REQ-ENV-5. File must include `PORT=8100`, `DB_SCHEMA=wt_<figura>`, `JIRA_EMAIL=`, `JIRA_API_TOKEN=`, `JIRA_SITE_URL=https://tablex.atlassian.net`, and the comment header. **REQ-ENV-5** — BLOCKED: sandbox write restriction on repo root (`.env` present blocks tool writes; ZEUS to create manually).
+- [x] **0.3** Update `team-context/ownership.md`: (a) flip `module:devops` row status from `slot` → `active`, (b) add `platform/worktree-orchestrator/**` and `.env.example` entries to the shared-file map with owner `HERMES`. **REQ-OWNER-1**
 
 ---
 
@@ -108,7 +108,7 @@
 
 ## Phase 5: Adapter (RED → GREEN — real git, testing.Short()-gated)
 
-- [ ] **5.1a [RED]** Write `adapter/gitcli/runner_test.go` with `testing.Short()` guard at top of each test (`if testing.Short() { t.Skip("integration: real git") }`). Test cases using `t.TempDir()` + `git init` + initial commit + local `develop` branch:
+- [x] **5.1a [RED]** Write `adapter/gitcli/runner_test.go` with `testing.Short()` guard at top of each test (`if testing.Short() { t.Skip("integration: real git") }`). Test cases using `t.TempDir()` + `git init` + initial commit + local `develop` branch:
   - `WorktreeAdd` creates dir + branch.
   - `WorktreeList` stdout round-trips through `domain.ParseWorktreeList` (adapter returns raw; domain parses).
   - `WorktreeRemove` on dirty worktree fails; adapter maps stderr → `ErrDirtyWorktree` (string-match strategy from design §8).
@@ -117,13 +117,13 @@
   - `BranchExists` returns true for existing branch, false for absent.
   - `BranchDelete` removes a merged branch (safe `git branch -d`).
   All tests must fail. **REQ-TEST-3, design §12 integration section, ADR-D1**
-- [ ] **5.1b [GREEN]** Write `adapter/gitcli/runner.go`: `Runner` struct implementing `GitRunner`. Uses `os/exec`, no third-party deps. Builds argv per-method (operation-shaped, not generic `Run(args...)`). `WorktreeList` returns raw stdout — does NOT parse (parser lives in domain, adapter only feeds bytes). `WorktreeRemove` maps dirty-refusal stderr to `ErrDirtyWorktree` via string match. All 5.1a tests must pass. **REQ-CREATE-1..4, REQ-LIST-1, REQ-TEARDOWN-1..5, design §4, §12, ADR-D4**
+- [x] **5.1b [GREEN]** Write `adapter/gitcli/runner.go`: `Runner` struct implementing `GitRunner`. Uses `os/exec`, no third-party deps. Builds argv per-method (operation-shaped, not generic `Run(args...)`). `WorktreeList` returns raw stdout — does NOT parse (parser lives in domain, adapter only feeds bytes). `WorktreeRemove` maps dirty-refusal stderr to `ErrDirtyWorktree` via string match. All 5.1a tests must pass. **REQ-CREATE-1..4, REQ-LIST-1, REQ-TEARDOWN-1..5, design §4, §12, ADR-D4**
 
 ---
 
 ## Phase 6: CLI (sequential — composition root, depends on all prior phases)
 
-- [ ] **6.1** Write `cmd/wt/main.go`: composition root with `main()` → `run(os.Args[1:])` → `os.Exit(exitCodeFor(err))` pattern (mirrors `cmd/evidence/main.go`). Subcommand switch: `create`, `list`, `teardown`, `env`; default → unknown subcommand error. Each `cmd*` function uses its own `flag.NewFlagSet`. CLI flags:
+- [x] **6.1** Write `cmd/wt/main.go`: composition root with `main()` → `run(os.Args[1:])` → `os.Exit(exitCodeFor(err))` pattern (mirrors `cmd/evidence/main.go`). Subcommand switch: `create`, `list`, `teardown`, `env`; default → unknown subcommand error. Each `cmd*` function uses its own `flag.NewFlagSet`. CLI flags:
   - `create <figura> <TAL-N> [--no-fetch]`
   - `list [--json]` (tabular default: FIGURA/BRANCH/PATH/HEAD/STATUS columns with header; `--json` emits JSON array per REQ-LIST-3)
   - `teardown <figura> <TAL-N> [--force] [--delete-branch]`
