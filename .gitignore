@@ -30,3 +30,6 @@ talos.wt/
 .DS_Store
 *.swp
 .idea/
+
+# Binario compilado del CLI evidence
+/platform/jira-evidence-loop/evidence
