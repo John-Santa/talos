@@ -95,12 +95,16 @@ func (r *Runner) WorktreeList(ctx context.Context) (string, error) {
 
 // WorktreeRemove removes the worktree at path. When force is false, git will
 // refuse if the worktree has uncommitted changes; the adapter maps that
-// specific stderr to domain.ErrDirtyWorktree. When force is true, passes
-// --force to git to allow removal of dirty worktrees.
+// specific stderr to domain.ErrDirtyWorktreeSentinel (WITHOUT figura — the
+// service is responsible for enriching it with the figura via ErrDirtyWorktree).
+// When force is true, passes --force to git to allow removal of dirty worktrees.
 //
 // Dirty-worktree detection strategy (design §8): string-match on stderr.
 // git writes "contains modified or untracked files" or "is dirty" when it
 // refuses to remove a non-clean worktree. We match both patterns.
+//
+// File count (REQ-TEARDOWN-2,3): best-effort via `git status --porcelain` run
+// against the worktree path. If it fails, FileCount is left at 0.
 func (r *Runner) WorktreeRemove(ctx context.Context, path string, force bool) error {
 	args := []string{"worktree", "remove"}
 	if force {
@@ -114,12 +118,33 @@ func (r *Runner) WorktreeRemove(ctx context.Context, path string, force bool) er
 		if !force && (strings.Contains(stderrLower, "contains modified or untracked files") ||
 			strings.Contains(stderrLower, "is dirty") ||
 			strings.Contains(stderrLower, "uncommitted changes")) {
-			return &worktree.ErrDirtyWorktree{Path: path}
+			return &worktree.ErrDirtyWorktreeSentinel{
+				Path:      path,
+				FileCount: r.countDirtyFiles(ctx, path),
+			}
 		}
 		return fmt.Errorf("git worktree remove %q: %w (stderr: %s)",
 			path, err, strings.TrimSpace(errOut))
 	}
 	return nil
+}
+
+// countDirtyFiles runs `git status --porcelain` in the worktree directory and
+// counts the number of dirty lines. Returns 0 on any error (best-effort).
+func (r *Runner) countDirtyFiles(ctx context.Context, wtPath string) int {
+	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
+	cmd.Dir = wtPath
+	out, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	return count
 }
 
 // Prune runs `git worktree prune` to clean up stale administrative state

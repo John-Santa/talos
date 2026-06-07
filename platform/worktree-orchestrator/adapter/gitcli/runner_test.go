@@ -146,9 +146,17 @@ func TestRunner_WorktreeRemove_Dirty(t *testing.T) {
 		t.Fatal("WorktreeRemove(dirty, force=false) expected error, got nil")
 	}
 
-	var dirty *worktree.ErrDirtyWorktree
+	// Adapter returns ErrDirtyWorktreeSentinel (no figura — service enriches it).
+	var dirty *worktree.ErrDirtyWorktreeSentinel
 	if !errors.As(err, &dirty) {
-		t.Errorf("error type = %T, want *ErrDirtyWorktree; err = %v", err, err)
+		t.Errorf("error type = %T, want *ErrDirtyWorktreeSentinel; err = %v", err, err)
+	}
+	if dirty.Path == "" {
+		t.Error("ErrDirtyWorktreeSentinel.Path is empty")
+	}
+	// FileCount should be >= 1 (we created one dirty file)
+	if dirty.FileCount < 1 {
+		t.Errorf("ErrDirtyWorktreeSentinel.FileCount = %d, want >= 1", dirty.FileCount)
 	}
 }
 
