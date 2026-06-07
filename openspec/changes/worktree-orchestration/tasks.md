@@ -30,7 +30,7 @@
 ## Phase 0: Repo-level scaffolding (sequential, no RED/GREEN — no logic)
 
 - [x] **0.1** Add `/platform/worktree-orchestrator/wt` to `.gitignore` (mirrors the `evidence` binary entry). No test needed — verified by `git status`. **REQ-ENV-5 (binary hygiene), design §13**
-- [ ] **0.2** Create `.env.example` at repo root with the exact content specified in REQ-ENV-5. File must include `PORT=8100`, `DB_SCHEMA=wt_<figura>`, `JIRA_EMAIL=`, `JIRA_API_TOKEN=`, `JIRA_SITE_URL=https://tablex.atlassian.net`, and the comment header. **REQ-ENV-5** — BLOCKED: sandbox write restriction on repo root (`.env` present blocks tool writes; ZEUS to create manually).
+- [x] **0.2** Create `.env.example` at repo root with `PORT=8100`, `DB_SCHEMA=wt_atlas`, and the comment header. `JIRA_*` fields are present but **commented** (documented as inherited from the parent env, NOT written per-worktree — aligns with constraint #4). **REQ-ENV-5** — created manually by ZEUS (sandbox blocks tool writes to repo-root `.env*`).
 - [x] **0.3** Update `team-context/ownership.md`: (a) flip `module:devops` row status from `slot` → `active`, (b) add `platform/worktree-orchestrator/**` and `.env.example` entries to the shared-file map with owner `HERMES`. **REQ-OWNER-1**
 
 ---
