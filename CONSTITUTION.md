@@ -157,7 +157,7 @@ recovery entre sesiones/compactaciones.
 | **HG0** | Fase 0 | `CONSTITUTION.md` congelado (este documento) |
 | **HG1** | pre-Fase 1 | Proyecto Jira **TAL** creado manualmente en la UI |
 | **HG2** | tras `tasks`, en cada change | Revisar `tasks.md` antes de que `apply` escriba código |
-| **HG3** | en cada change | Aprobar el merge final a `main` |
+| **HG3** | en cada change | Aprobar el merge del PR a `develop` (release `develop`→`main` es aparte) |
 | **HG4** | fin Fase 1 | Primer change archivado: loop + evidencia válidos antes de escalar |
 | **HG5** | Fase 3+ | ARGOS / Judgment Day **APPROVED** (gate duro pre-`sdd-archive`) |
 | **HG6** | pre-Fase 4 | OK a escalar 2→5+ agentes tras revisar costo + métricas de colisión |
@@ -170,7 +170,9 @@ recovery entre sesiones/compactaciones.
 - **Worktree por agente + rama por agente** sobre UN solo monorepo (NO clones). `isolation: worktree`.
 - Los worktrees aíslan **filesystem + branch**, NO procesos/puertos/DB. Aislamiento real = **`.env`
   por worktree** (puertos disjuntos + schema de DB por agente).
-- **Merge ordenado**: de a un worktree contra `main`, o rebase-sobre-`main`-antes-del-PR. El worktree
+- **Branching (GitFlow):** los PRs de los agentes van contra **`develop`** (rama de integración), NO `main`.
+  `develop`→`main` es solo para releases.
+- **Merge ordenado**: de a un worktree contra `develop`, o rebase-sobre-`develop`-antes-del-PR. El worktree
   sin cambios se limpia solo.
 - **Dos issues sobre el mismo archivo → nunca en paralelo.** Se serializa o se re-segmenta.
 - **Métrica de salud:** tasa de conflictos de merge **> ~15% = segmentación mala** → re-segmentar
