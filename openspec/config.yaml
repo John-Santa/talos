@@ -1,0 +1,64 @@
+# openspec/config.yaml — contexto SDD de talos
+# Generado como equivalente de sdd-init (el skill está bloqueado en este entorno por su captura de pwd).
+# Fuente de verdad de convenciones: ../CONSTITUTION.md
+
+project: talos
+
+# --- Store de artefactos (CONSTITUTION.md §9) ---
+artifact_store: hybrid          # openspec/ committeable + engram para recovery
+persistence:
+  engram: true
+  openspec: true
+doc_zones: false                # NO docs/sdd/ hasta Fase 5 (si existiera → engram-only, rompe el híbrido)
+
+# --- Stack (decisión de Fase 0; per-instancia, ver CLAUDE.md) ---
+stack:
+  backend:
+    language: go
+    test: "go test ./..."
+  frontend:
+    framework: react
+    bundler: vite
+    language: typescript
+    test: "vitest run"
+
+# --- Testing / TDD ---
+testing:
+  strict_tdd: true              # Strict TDD Mode activo → apply/verify NO caen a Standard Mode
+  runners:
+    - "go test ./..."
+    - "vitest run"
+
+# --- Revisión adversarial (CONSTITUTION.md §12) ---
+review:
+  require_judgment_day: true    # gate duro APPROVED pre-archive desde Fase 3 (HG5)
+  reviewer_distinct_from_implementor: true
+
+# --- Convenciones (detalle en CONSTITUTION.md) ---
+conventions:
+  constitution: CONSTITUTION.md
+  branch_naming: "agent/<figura>/<JIRA-KEY>"
+  labels: ["agent:*", "module:*", "change:*", "phase:*"]
+  ownership: team-context/ownership.md
+  mcp_routing: .mcp/routing.md
+
+# --- Jira ---
+jira:
+  site: tablex.atlassian.net
+  project_key: TAL              # creado en gate HG1 (id 10099, team-managed)
+  project_id: "10099"
+  issue_types:                  # ⚠ nombres en ESPAÑOL en este site
+    task: "Tarea"
+    story: "Historia"
+    epic: "Epic"
+    bug: "Error"
+  identity_model: shared-account-plus-agent-label
+
+# --- Gates humanos (ZEUS) ---
+human_gates: [HG0, HG1, HG2, HG3, HG4, HG5, HG6, HG7]
+
+# --- Layout de artefactos ---
+paths:
+  changes: openspec/changes/
+  archive: openspec/changes/archive/
+  specs: openspec/specs/

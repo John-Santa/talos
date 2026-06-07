@@ -1,0 +1,32 @@
+# Entorno — el .env real es por-worktree y NUNCA se commitea
+.env
+.env.*
+!.env.example
+
+# Dependencias / build (stack se define en Fase 1)
+node_modules/
+__pycache__/
+.venv/
+venv/
+dist/
+build/
+target/
+*.egg-info/
+
+# Tests / coverage
+coverage/
+.coverage
+.pytest_cache/
+htmlcov/
+
+# Worktrees de agentes (viven como hermanos, por las dudas)
+talos.wt/
+
+# Logs / temporales
+*.log
+.cache/
+
+# SO / editor
+.DS_Store
+*.swp
+.idea/
