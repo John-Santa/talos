@@ -5,6 +5,8 @@ package mock
 import (
 	"context"
 	"fmt"
+
+	"github.com/John-Santa/talos/platform/worktree-orchestrator/domain/worktree"
 )
 
 // Call records a single invocation of a mock method.
@@ -28,8 +30,14 @@ type GitRunnerMock struct {
 	// Programmable return values — set before the test runs.
 	FetchErr error
 
+	// BranchExistsResult is the fallback result for BranchExists when
+	// BranchExistsResultsByBranch is nil or does not contain the branch.
 	BranchExistsResult bool
 	BranchExistsErr    error
+	// BranchExistsResultsByBranch allows per-branch BranchExists results.
+	// When set, the mock looks up the branch name; if not found it falls back
+	// to BranchExistsResult.
+	BranchExistsResultsByBranch map[string]bool
 
 	WorktreeAddErr error
 
@@ -41,6 +49,18 @@ type GitRunnerMock struct {
 	PruneErr error
 
 	BranchDeleteErr error
+}
+
+// ErrDirtyWorktreeSentinel returns an *worktree.ErrDirtyWorktreeSentinel for
+// use in tests that need the adapter to signal a dirty worktree without a figura.
+func ErrDirtyWorktreeSentinel(path string) error {
+	return &worktree.ErrDirtyWorktreeSentinel{Path: path}
+}
+
+// ErrDirtyWorktreeSentinelWithCount returns an *worktree.ErrDirtyWorktreeSentinel
+// with a file count, for tests that verify REQ-TEARDOWN-2,3 file-count reporting.
+func ErrDirtyWorktreeSentinelWithCount(path string, count int) error {
+	return &worktree.ErrDirtyWorktreeSentinel{Path: path, FileCount: count}
 }
 
 // NewGitRunnerMock returns an initialized, empty mock.
@@ -124,6 +144,11 @@ func (m *GitRunnerMock) Fetch(_ context.Context) error {
 
 func (m *GitRunnerMock) BranchExists(_ context.Context, branch string) (bool, error) {
 	m.record("BranchExists", branch)
+	if m.BranchExistsResultsByBranch != nil {
+		if result, ok := m.BranchExistsResultsByBranch[branch]; ok {
+			return result, m.BranchExistsErr
+		}
+	}
 	return m.BranchExistsResult, m.BranchExistsErr
 }
 

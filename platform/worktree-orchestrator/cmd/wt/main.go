@@ -124,21 +124,6 @@ type listEntry struct {
 	Status string `json:"status"`
 }
 
-// worktreeStatus derives the STATUS for display.
-// Status derivation is a presentation concern (per tasks.md note for task 6.1):
-//   - "active"  — worktree path exists on disk and is not detached
-//   - "detached" — HEAD is detached (worktree exists but no branch)
-//   - "stale"   — path no longer exists on disk (prune candidate)
-func worktreeStatus(info worktree.WorktreeInfo) string {
-	if info.Detached {
-		return "detached"
-	}
-	if _, err := os.Stat(info.Path); os.IsNotExist(err) {
-		return "stale"
-	}
-	return "active"
-}
-
 // parseFiguraFromBranch extracts the figura from a branch name of the form
 // agent/<figura>/<TAL-N>. Returns the branch itself if pattern doesn't match.
 func parseFiguraFromBranch(branch string) string {
@@ -159,26 +144,26 @@ func cmdList(args []string) error {
 
 	o := newOrchestrator()
 	ctx := context.Background()
-	infos, err := o.List(ctx)
+	statuses, err := o.List(ctx)
 	if err != nil {
 		return err
 	}
 
 	if *jsonOut {
-		return renderListJSON(infos)
+		return renderListJSON(statuses)
 	}
-	return renderListTabular(infos)
+	return renderListTabular(statuses)
 }
 
-func renderListJSON(infos []worktree.WorktreeInfo) error {
-	entries := make([]listEntry, 0, len(infos))
-	for _, info := range infos {
+func renderListJSON(statuses []service.WorktreeStatus) error {
+	entries := make([]listEntry, 0, len(statuses))
+	for _, ws := range statuses {
 		entries = append(entries, listEntry{
-			Figura: parseFiguraFromBranch(info.Branch),
-			Branch: info.Branch,
-			Path:   info.Path,
-			Head:   info.Head,
-			Status: worktreeStatus(info),
+			Figura: parseFiguraFromBranch(ws.Info.Branch),
+			Branch: ws.Info.Branch,
+			Path:   ws.Info.Path,
+			Head:   ws.Info.Head,
+			Status: ws.Status,
 		})
 	}
 	enc := json.NewEncoder(os.Stdout)
@@ -186,20 +171,20 @@ func renderListJSON(infos []worktree.WorktreeInfo) error {
 	return enc.Encode(entries)
 }
 
-func renderListTabular(infos []worktree.WorktreeInfo) error {
-	if len(infos) == 0 {
+func renderListTabular(statuses []service.WorktreeStatus) error {
+	if len(statuses) == 0 {
 		fmt.Println("no active agent worktrees")
 		return nil
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "FIGURA\tBRANCH\tPATH\tHEAD\tSTATUS")
-	for _, info := range infos {
+	for _, ws := range statuses {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			parseFiguraFromBranch(info.Branch),
-			info.Branch,
-			info.Path,
-			info.Head,
-			worktreeStatus(info),
+			parseFiguraFromBranch(ws.Info.Branch),
+			ws.Info.Branch,
+			ws.Info.Path,
+			ws.Info.Head,
+			ws.Status,
 		)
 	}
 	return w.Flush()
