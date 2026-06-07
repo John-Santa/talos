@@ -346,3 +346,157 @@ func TestEvidenceLoop_Run_TransitionNoOpWhenAlreadyIndeterminate(t *testing.T) {
 	// DoTransition called once only (for done at step 7), not for indeterminate.
 	m.AssertCallCount(t, "DoTransition", 1)
 }
+
+// ---------------------------------------------------------------------------
+// Transition disambiguation: multiple candidates in the same category
+//
+// The real TAL board has THREE indeterminate states: "En curso", "En revisión",
+// "Bloqueado". When GetTransitions returns all three, doTransitionToCategory
+// must pick the first entry in OrderedStates["indeterminate"] (ordinal=0),
+// which is "En curso" (ID "21"). This exercises the multi-candidate branch
+// that the happy-path tests never reach.
+// ---------------------------------------------------------------------------
+
+// threeIndeterminateTransitions simulates the real TAL board: three transitions
+// in the indeterminate category with distinct IDs and names.
+func threeIndeterminateTransitions() []evidence.Transition {
+	return []evidence.Transition{
+		// indeterminate candidates in a board-API order that differs from
+		// OrderedStates so we verify name-match, not position-match.
+		{ID: "31", ToName: "Bloqueado", ToCategory: service.StatusCategoryIndeterminate},
+		{ID: "21", ToName: "En curso", ToCategory: service.StatusCategoryIndeterminate},
+		{ID: "41", ToName: "En revisión", ToCategory: service.StatusCategoryIndeterminate},
+		// Non-indeterminate transitions always present.
+		{ID: "11", ToName: "Por hacer", ToCategory: service.StatusCategoryNew},
+		{ID: "51", ToName: "Listo", ToCategory: service.StatusCategoryDone},
+	}
+}
+
+// doTransitionIDFor is a test helper that returns the transitionID argument
+// from the n-th DoTransition call in the mock's call log (0-indexed).
+func doTransitionIDFor(t *testing.T, m *mock.JiraClientMock, callIndex int) string {
+	t.Helper()
+	dt := m.CallsFor("DoTransition")
+	if callIndex >= len(dt) {
+		t.Fatalf("DoTransition call[%d] does not exist (total=%d)", callIndex, len(dt))
+	}
+	id, ok := dt[callIndex].Args[1].(string)
+	if !ok {
+		t.Fatalf("DoTransition Args[1] is not a string: %T", dt[callIndex].Args[1])
+	}
+	return id
+}
+
+// TestDisambiguation_InProgressPicksEnCurso verifies that when GetTransitions
+// returns all three indeterminate states, the service selects "En curso" (the
+// first entry in OrderedStates["indeterminate"]) for the In-Progress step.
+func TestDisambiguation_InProgressPicksEnCurso(t *testing.T) {
+	m := mock.NewJiraClientMock()
+	m.SearchResults = nil
+	m.CreateIssueResult = evidence.Issue{Key: "TAL-20"}
+	m.GetTransitionsResult = threeIndeterminateTransitions()
+
+	loop := service.NewEvidenceLoop(m, validConfig())
+	key, err := loop.Run(context.Background(), validInput())
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if key != "TAL-20" {
+		t.Errorf("key = %q, want \"TAL-20\"", key)
+	}
+
+	// Step 2 (indeterminate): must pick "En curso" → ID "21".
+	// Step 7 (done): must pick "Listo" → ID "51".
+	m.AssertCallCount(t, "DoTransition", 2)
+
+	if got := doTransitionIDFor(t, m, 0); got != "21" {
+		t.Errorf("step 2 DoTransition ID = %q, want \"21\" (En curso)", got)
+	}
+	if got := doTransitionIDFor(t, m, 1); got != "51" {
+		t.Errorf("step 7 DoTransition ID = %q, want \"51\" (Listo)", got)
+	}
+}
+
+// TestDisambiguation_DoneAlwaysPictsListo verifies that the done-category
+// disambiguation still resolves correctly when indeterminate has 3 candidates
+// (i.e., the done branch is unaffected by indeterminate noise).
+func TestDisambiguation_DoneAlwaysPictsListo(t *testing.T) {
+	m := mock.NewJiraClientMock()
+	m.SearchResults = []evidence.Issue{{Key: "TAL-21"}} // reuse existing
+	m.GetTransitionsResult = threeIndeterminateTransitions()
+
+	loop := service.NewEvidenceLoop(m, validConfig())
+	key, err := loop.Run(context.Background(), validInput())
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if key != "TAL-21" {
+		t.Errorf("key = %q, want \"TAL-21\"", key)
+	}
+
+	// Step 7 must select "Listo" (ID "51"), the sole done candidate.
+	if got := doTransitionIDFor(t, m, 1); got != "51" {
+		t.Errorf("step 7 DoTransition ID = %q, want \"51\" (Listo)", got)
+	}
+}
+
+// TestDisambiguation_CandidateNotInOrderedStates verifies the fallback
+// behaviour when the OrderedStates name for ordinal=0 does NOT appear among
+// the returned candidates. The code falls back to candidates[0] (first in the
+// slice returned by GetTransitions). This is explicitly documented behaviour:
+// the fallback is deterministic relative to the API's ordering, not random.
+// The test asserts the actual behaviour so that any accidental change is caught.
+func TestDisambiguation_CandidateNotInOrderedStates(t *testing.T) {
+	// Config with an indeterminate name that won't match any returned transition.
+	cfgMismatched := validConfig()
+	cfgMismatched.OrderedStates[service.StatusCategoryIndeterminate] = []string{"Inexistente"}
+
+	m := mock.NewJiraClientMock()
+	m.SearchResults = nil
+	m.CreateIssueResult = evidence.Issue{Key: "TAL-22"}
+	// Three indeterminate candidates; none is named "Inexistente".
+	// Slice order: Bloqueado (31), En curso (21), En revisión (41).
+	m.GetTransitionsResult = threeIndeterminateTransitions()
+
+	loop := service.NewEvidenceLoop(m, cfgMismatched)
+	_, err := loop.Run(context.Background(), validInput())
+	if err != nil {
+		t.Fatalf("Run() error = %v (expected fallback to succeed)", err)
+	}
+
+	// The fallback uses candidates[0], which is the first element in the
+	// filtered indeterminate slice — iteration order over threeIndeterminateTransitions
+	// means the first indeterminate candidate appended is "Bloqueado" (ID "31").
+	if got := doTransitionIDFor(t, m, 0); got != "31" {
+		t.Errorf("fallback DoTransition ID = %q, want \"31\" (Bloqueado, first indeterminate candidate)", got)
+	}
+}
+
+// TestDisambiguation_NoCandidatesForCategory verifies that when GetTransitions
+// returns transitions for other categories but none for the target category,
+// the result is a no-op (nil error), not ErrTransitionUnreachable.
+// The issue is assumed to already be in the target state.
+func TestDisambiguation_NoCandidatesForCategory(t *testing.T) {
+	m := mock.NewJiraClientMock()
+	m.SearchResults = nil
+	m.CreateIssueResult = evidence.Issue{Key: "TAL-23"}
+	// No indeterminate transitions — issue is already In Progress.
+	m.GetTransitionsResult = []evidence.Transition{
+		{ID: "11", ToName: "Por hacer", ToCategory: service.StatusCategoryNew},
+		{ID: "51", ToName: "Listo", ToCategory: service.StatusCategoryDone},
+	}
+
+	loop := service.NewEvidenceLoop(m, validConfig())
+	key, err := loop.Run(context.Background(), validInput())
+	if err != nil {
+		t.Fatalf("Run() error = %v, want nil (no-op when already in target state)", err)
+	}
+	if key != "TAL-23" {
+		t.Errorf("key = %q, want \"TAL-23\"", key)
+	}
+	// Only the done transition fires (step 7); step 2 is a no-op.
+	m.AssertCallCount(t, "DoTransition", 1)
+	if got := doTransitionIDFor(t, m, 0); got != "51" {
+		t.Errorf("DoTransition ID = %q, want \"51\" (Listo, step 7)", got)
+	}
+}
