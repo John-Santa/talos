@@ -1,0 +1,63 @@
+// Package worktree contains the pure domain logic for the worktree-orchestrator.
+// Zero I/O, zero third-party imports.
+package worktree
+
+import "fmt"
+
+// ErrInvalidFigure is returned when a figura string is not in the CONSTITUTION §1 roster.
+type ErrInvalidFigure struct {
+	Figura string
+}
+
+func (e *ErrInvalidFigure) Error() string {
+	return fmt.Sprintf("invalid figura %q: not in CONSTITUTION §1 roster", e.Figura)
+}
+
+// ErrInvalidKey is returned when a Jira key does not match the TAL-<n> pattern.
+type ErrInvalidKey struct {
+	Key string
+}
+
+func (e *ErrInvalidKey) Error() string {
+	return fmt.Sprintf("invalid jira key %q: must match TAL-<n> (n >= 1)", e.Key)
+}
+
+// ErrWorktreeExists is returned when a worktree for the given figura already exists.
+type ErrWorktreeExists struct {
+	Figura string
+	Path   string
+}
+
+func (e *ErrWorktreeExists) Error() string {
+	return fmt.Sprintf("worktree for figura %q already exists at %q", e.Figura, e.Path)
+}
+
+// ErrBranchExists is returned when the target branch already exists in the repo.
+type ErrBranchExists struct {
+	Branch string
+}
+
+func (e *ErrBranchExists) Error() string {
+	return fmt.Sprintf("branch %q already exists", e.Branch)
+}
+
+// ErrWorktreeNotFound is returned when no worktree for the given figura is found.
+type ErrWorktreeNotFound struct {
+	Figura string
+	Path   string
+}
+
+func (e *ErrWorktreeNotFound) Error() string {
+	return fmt.Sprintf("worktree for figura %q not found at %q", e.Figura, e.Path)
+}
+
+// ErrDirtyWorktree is returned when a worktree has uncommitted changes and --force
+// was not supplied.
+type ErrDirtyWorktree struct {
+	Figura string
+	Path   string
+}
+
+func (e *ErrDirtyWorktree) Error() string {
+	return fmt.Sprintf("worktree for figura %q at %q has uncommitted changes; use --force to override", e.Figura, e.Path)
+}
