@@ -31,5 +31,6 @@ talos.wt/
 *.swp
 .idea/
 
-# Binario compilado del CLI evidence
+# Binarios compilados de los CLIs
 /platform/jira-evidence-loop/evidence
+/platform/worktree-orchestrator/wt

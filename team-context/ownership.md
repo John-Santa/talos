@@ -13,7 +13,7 @@
 | `module:frontend` | IRIS | UI / interacción | slot |
 | `module:data` | GAIA | esquema / persistencia / migraciones | slot |
 | `module:qa` | THEMIS | tests / harness / métricas | slot |
-| `module:devops` | HERMES | CI / release / entornos | slot |
+| `module:devops` | HERMES | CI / release / entornos | active |
 | `module:jira-loop` | HERMES | Jira lifecycle / evidence plumbing | active |
 
 > Los `backend-ctxN` son **slots**: la fase `explore` les asigna el nombre del bounded context real
@@ -35,4 +35,5 @@
 
 | Archivo / path | Dueño | Nota |
 |---|---|---|
-| _(pendiente — se puebla en `explore`/`tasks`)_ | | |
+| `.env.example` | HERMES | Template raíz para vars de worktree; sin credenciales Jira reales |
+| `platform/worktree-orchestrator/**` | HERMES | CLI `wt`, dominio, servicio, adapter gitcli |
