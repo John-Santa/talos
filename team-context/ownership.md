@@ -14,6 +14,7 @@
 | `module:data` | GAIA | esquema / persistencia / migraciones | slot |
 | `module:qa` | THEMIS | tests / harness / métricas | slot |
 | `module:devops` | HERMES | CI / release / entornos | slot |
+| `module:jira-loop` | HERMES | Jira lifecycle / evidence plumbing | active |
 
 > Los `backend-ctxN` son **slots**: la fase `explore` les asigna el nombre del bounded context real
 > (auth, billing, catálogo…). Si no salen 3 contextos backend genuinamente independientes,
