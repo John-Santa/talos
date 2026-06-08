@@ -68,7 +68,11 @@ func (g *Guard) ScanInFlight(ctx context.Context) (overlap.Report, error) {
 // CheckPreAssignment runs the T0 gate: JQL search → parse each checklist → cross with the owner's declared files.
 func (g *Guard) CheckPreAssignment(ctx context.Context, module, owner string, ownerFiles []string) (overlap.Report, error) {
 	jql := overlap.BuildPreAssignmentJQL(g.cfg.Project, module, owner)
-	issues, err := g.searcher.Search(ctx, jql, 100)
+	maxResults := g.cfg.MaxResults
+	if maxResults <= 0 {
+		maxResults = 100
+	}
+	issues, err := g.searcher.Search(ctx, jql, maxResults)
 	if err != nil {
 		return overlap.Report{}, fmt.Errorf("searching Jira: %w", err)
 	}

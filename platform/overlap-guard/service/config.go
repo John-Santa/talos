@@ -17,6 +17,8 @@ type Config struct {
 	Threshold float64
 	// NoFetch skips the initial git fetch when true.
 	NoFetch bool
+	// MaxResults caps the Jira search result count for T0 checks; defaults to 100.
+	MaxResults int
 }
 
 // DefaultTALConfig returns a Config seeded with the Talos platform defaults.
@@ -26,5 +28,6 @@ func DefaultTALConfig() Config {
 		WtBinary:   "wt",
 		Project:    "TAL",
 		Threshold:  0.15,
+		MaxResults: 100,
 	}
 }
