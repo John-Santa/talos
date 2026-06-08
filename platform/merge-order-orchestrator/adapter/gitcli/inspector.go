@@ -131,9 +131,8 @@ func (r *Inspector) ChangedFiles(ctx context.Context, base, branch string) ([]st
 	return files, nil
 }
 
-// BranchCreatedAt returns the committer timestamp of the latest commit on branch.
-// This is an adapter-internal helper (not on the port.GitInspector interface) used by
-// the cmd layer to populate Candidate.CreatedAt.
+// BranchCreatedAt returns the committer timestamp of the latest commit on branch,
+// satisfying port.GitInspector for FIFO candidate ordering.
 func (r *Inspector) BranchCreatedAt(ctx context.Context, branch string) (time.Time, error) {
 	out, errOut, err := r.run(ctx, "log", "-1", "--format=%cI", branch)
 	if err != nil {

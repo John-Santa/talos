@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/John-Santa/talos/platform/merge-order-orchestrator/domain/mergeorder"
 	"github.com/John-Santa/talos/platform/merge-order-orchestrator/port"
@@ -118,7 +117,10 @@ func (p *Planner) buildCandidates(ctx context.Context, entries []port.WorktreeEn
 		if err != nil {
 			return nil, fmt.Errorf("getting changed files for %s: %w", e.Branch, err)
 		}
-		var createdAt time.Time
+		createdAt, err := p.inspector.BranchCreatedAt(ctx, e.Branch)
+		if err != nil {
+			return nil, fmt.Errorf("getting branch creation time for %s: %w", e.Branch, err)
+		}
 		candidates = append(candidates, mergeorder.Candidate{
 			Figura:       e.Figura,
 			Branch:       e.Branch,

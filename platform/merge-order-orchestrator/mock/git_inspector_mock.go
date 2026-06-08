@@ -4,6 +4,7 @@ package mock
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/John-Santa/talos/platform/merge-order-orchestrator/port"
 )
@@ -39,6 +40,9 @@ type GitInspectorMock struct {
 
 	// ChangedFilesByBranch maps branch → changed file list.
 	ChangedFilesByBranch map[string][]string
+
+	// BranchCreatedAtByBranch maps branch → committer timestamp for FIFO ordering.
+	BranchCreatedAtByBranch map[string]time.Time
 }
 
 // NewGitInspectorMock returns an initialized, empty mock.
@@ -162,6 +166,16 @@ func (m *GitInspectorMock) ChangedFiles(_ context.Context, base, branch string) 
 		return m.ChangedFilesByBranch[branch], nil
 	}
 	return nil, nil
+}
+
+func (m *GitInspectorMock) BranchCreatedAt(_ context.Context, branch string) (time.Time, error) {
+	m.record("BranchCreatedAt", branch)
+	if m.BranchCreatedAtByBranch != nil {
+		if ts, ok := m.BranchCreatedAtByBranch[branch]; ok {
+			return ts, nil
+		}
+	}
+	return time.Time{}, nil
 }
 
 var _ port.GitInspector = (*GitInspectorMock)(nil)
