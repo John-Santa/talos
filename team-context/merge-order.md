@@ -1,10 +1,10 @@
 # Blackboard — Disciplina de merge
 
-> Cómo se reconcilian las ramas de los agentes contra `main`. ATHENA coordina (Fase 2+).
+> Cómo se reconcilian las ramas de los agentes contra `develop`. ATHENA coordina (Fase 2+).
 
 ## Estrategia
 
-- **Merge ordenado:** de a **un worktree a la vez** contra `main`, **o** rebase-sobre-`main`-antes-del-PR.
+- **Merge ordenado:** de a **un worktree a la vez** contra `develop`, **o** rebase-sobre-`develop`-antes-del-PR.
 - Nunca dos merges concurrentes sin rebase previo.
 - El worktree sin cambios se limpia solo.
 

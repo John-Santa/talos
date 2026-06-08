@@ -261,6 +261,71 @@ func TestPlanner_Check_ConflictingBranch(t *testing.T) {
 	}
 }
 
+// TestPlanner_Plan_FIFOByCreationTime proves that two zero-conflict branches are ordered
+// by creation time (older first), NOT by lexicographic branch name.
+// RED: will fail until BranchCreatedAt is on port.GitInspector and called in buildCandidates.
+func TestPlanner_Plan_FIFOByCreationTime(t *testing.T) {
+	t.Parallel()
+	inspector := mock.NewGitInspectorMock()
+	lister := mock.NewWorktreeListerMock()
+
+	// "feat/z-newer" sorts BEFORE "feat/a-older" lexicographically (z > a is false, but z > a means z sorts after a).
+	// Actually: "feat/a-older" < "feat/z-newer" lexicographically → without time, a-older goes first (looks correct by accident).
+	// Use names where lex order CONTRADICTS time order: "feat/z-older" was created before "feat/a-newer".
+	// Lex order: feat/a-newer < feat/z-older → lex puts a-newer first.
+	// Time order: feat/z-older was created first (older) → time puts z-older first.
+	// If FIFO is working, z-older should be first. If lex fallback, a-newer would be first.
+	lister.ListResult = []port.WorktreeEntry{
+		makeActiveEntry("atlas", "feat/z-older", "wt/z"),
+		makeActiveEntry("hermes", "feat/a-newer", "wt/a"),
+	}
+
+	older := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	newer := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+
+	inspector.RevParseResults = map[string]string{
+		"develop":      "dev-tip",
+		"feat/z-older": "sha-z",
+		"feat/a-newer": "sha-a",
+	}
+	inspector.CommitsAheadByBranch = map[string]int{
+		"feat/z-older": 1,
+		"feat/a-newer": 1,
+	}
+	// Both clean (nil = clean in mock convention)
+	// No MergeTreeConflictsByBranch entries → both clean
+
+	inspector.BranchCreatedAtByBranch = map[string]time.Time{
+		"feat/z-older": older,
+		"feat/a-newer": newer,
+	}
+
+	cfg := defaultCfg()
+	cfg.NoFetch = true
+	planner := service.NewPlanner(inspector, lister, cfg)
+
+	report, err := planner.Plan(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("Plan() unexpected error: %v", err)
+	}
+	if len(report.Plan.Steps) != 2 {
+		t.Fatalf("Steps len = %d, want 2", len(report.Plan.Steps))
+	}
+
+	// FIFO: older branch must be first regardless of lex order
+	if report.Plan.Steps[0].Candidate.Branch != "feat/z-older" {
+		t.Errorf("step[0] branch = %q, want %q (FIFO by creation time, not lex order)",
+			report.Plan.Steps[0].Candidate.Branch, "feat/z-older")
+	}
+	if report.Plan.Steps[1].Candidate.Branch != "feat/a-newer" {
+		t.Errorf("step[1] branch = %q, want %q",
+			report.Plan.Steps[1].Candidate.Branch, "feat/a-newer")
+	}
+
+	_ = older
+	_ = newer
+}
+
 func TestPlanner_Check_UnknownBranch_ErrBranchNotFound(t *testing.T) {
 	t.Parallel()
 	inspector := mock.NewGitInspectorMock()

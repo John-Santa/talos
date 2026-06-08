@@ -34,3 +34,4 @@ talos.wt/
 # Binarios compilados de los CLIs
 /platform/jira-evidence-loop/evidence
 /platform/worktree-orchestrator/wt
+/platform/merge-order-orchestrator/mo

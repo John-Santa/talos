@@ -1,7 +1,10 @@
 // Package port defines the outbound ports for the merge-order-orchestrator.
 package port
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // GitInspector is the read-only outbound port for git inspection operations.
 type GitInspector interface {
@@ -23,4 +26,8 @@ type GitInspector interface {
 
 	// ChangedFiles returns the files changed between base and branch (three-dot diff).
 	ChangedFiles(ctx context.Context, base, branch string) ([]string, error)
+
+	// BranchCreatedAt returns the committer timestamp of the latest commit on branch,
+	// used to establish FIFO ordering among candidates with equal conflict surface.
+	BranchCreatedAt(ctx context.Context, branch string) (time.Time, error)
 }
