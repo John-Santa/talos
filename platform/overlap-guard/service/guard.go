@@ -80,14 +80,15 @@ func (g *Guard) CheckPreAssignment(ctx context.Context, module, owner string, ow
 	ownerClaim := overlap.NewClaim(owner, module, "owner", ownerFiles, overlap.SourceDeclared)
 	claims := []overlap.Claim{ownerClaim}
 
+	var advisories []string
 	for _, issue := range issues {
 		issueAgent := agentFromLabels(issue.Labels)
 		issueModule := moduleFromLabels(issue.Labels)
 
 		files, parseErr := overlap.ParseFilesChecklist(issue.Body)
 		if parseErr != nil {
-			// ErrChecklistMissing: advisory — exclude from file-level, keep for module-level.
-			// Create a claim with no files so it contributes to module overlaps only.
+			// ErrChecklistMissing: advisory — exclude from file-level, keep for module-level (REQ-CHECKLIST-4).
+			advisories = append(advisories, fmt.Sprintf("%s sin checklist files: — solape a nivel-archivo no verificable", issue.Key))
 			claims = append(claims, overlap.NewClaim(issueAgent, issueModule, issue.Key, []string{}, overlap.SourceDeclared))
 			continue
 		}
@@ -95,7 +96,9 @@ func (g *Guard) CheckPreAssignment(ctx context.Context, module, owner string, ow
 		claims = append(claims, overlap.NewClaim(issueAgent, issueModule, issue.Key, files, overlap.SourceDeclared))
 	}
 
-	return overlap.NewReport(claims, g.cfg.Threshold), nil
+	report := overlap.NewReport(claims, g.cfg.Threshold)
+	report.Advisories = advisories
+	return report, nil
 }
 
 // Metric runs ScanInFlight and returns its Report for the HG6 collision-rate gate.
