@@ -2,11 +2,13 @@
 //
 // Usage:
 //
-//	ch labels    --branch BRANCH [--ownership-file F] [--site-url URL] [--json]
-//	ch ownership [--ownership-file F] [--json]
+//	ch labels          --branch BRANCH [--ownership-file F] [--site-url URL] [--json]
+//	ch ownership       [--ownership-file F] [--json]
+//	ch changed-modules [--json]  (reads changed file paths from stdin, one per line)
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -32,15 +34,17 @@ func main() {
 
 func run(args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return fmt.Errorf("subcommand required: labels | ownership")
+		return fmt.Errorf("subcommand required: labels | ownership | changed-modules")
 	}
 	switch args[0] {
 	case "labels":
 		return cmdLabels(args[1:], out)
 	case "ownership":
 		return cmdOwnership(args[1:], out)
+	case "changed-modules":
+		return cmdChangedModules(os.Stdin, out, args[1:])
 	default:
-		return fmt.Errorf("unknown subcommand %q; available: labels, ownership", args[0])
+		return fmt.Errorf("unknown subcommand %q; available: labels, ownership, changed-modules", args[0])
 	}
 }
 
@@ -207,6 +211,35 @@ func extractLabels(ctx context.Context, reader interface {
 		return nil
 	}
 	return labels
+}
+
+// cmdChangedModules reads changed file paths from r (one per line), detects which
+// platform/<module> roots were touched, and prints each on its own line.
+// With --json it prints a JSON array instead. Exit 0 always.
+func cmdChangedModules(r io.Reader, out io.Writer, args []string) error {
+	fs := flag.NewFlagSet("changed-modules", flag.ContinueOnError)
+	jsonOut := fs.Bool("json", false, "Output as JSON array")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	var paths []string
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		if line := strings.TrimSpace(scanner.Text()); line != "" {
+			paths = append(paths, line)
+		}
+	}
+
+	modules := cichecks.ModulesFromChangedPaths(paths)
+
+	if *jsonOut {
+		return writeJSON(out, modules)
+	}
+	for _, m := range modules {
+		fmt.Fprintln(out, m)
+	}
+	return nil
 }
 
 func cmdOwnership(args []string, out io.Writer) error {

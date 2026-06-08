@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -256,3 +257,101 @@ func noopContext() context.Context {
 }
 
 var _ = noopContext
+
+// TestChangedModules_StdinPaths verifies that changed-modules reads paths from a reader and prints module roots.
+func TestChangedModules_StdinPaths(t *testing.T) {
+	input := strings.NewReader("platform/ci-checks/domain/cichecks/label.go\nplatform/ci-checks/go.mod\n")
+	var buf bytes.Buffer
+	err := cmdChangedModules(input, &buf, []string{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := strings.TrimSpace(buf.String())
+	if out != "platform/ci-checks" {
+		t.Errorf("output = %q, want %q", out, "platform/ci-checks")
+	}
+}
+
+// TestChangedModules_TwoModules verifies two modules are printed one per line, sorted.
+func TestChangedModules_TwoModules(t *testing.T) {
+	input := strings.NewReader("platform/foo/a.go\nplatform/bar/b.go\n")
+	var buf bytes.Buffer
+	err := cmdChangedModules(input, &buf, []string{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	want := []string{"platform/bar", "platform/foo"}
+	if !reflect.DeepEqual(lines, want) {
+		t.Errorf("lines = %v, want %v", lines, want)
+	}
+}
+
+// TestChangedModules_NonPlatformIgnored verifies that non-platform paths produce empty output.
+func TestChangedModules_NonPlatformIgnored(t *testing.T) {
+	input := strings.NewReader("openspec/changes/x.md\nREADME.md\n")
+	var buf bytes.Buffer
+	err := cmdChangedModules(input, &buf, []string{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if buf.String() != "" {
+		t.Errorf("expected empty output, got %q", buf.String())
+	}
+}
+
+// TestChangedModules_EmptyInput verifies empty input produces empty output.
+func TestChangedModules_EmptyInput(t *testing.T) {
+	input := strings.NewReader("")
+	var buf bytes.Buffer
+	err := cmdChangedModules(input, &buf, []string{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if buf.String() != "" {
+		t.Errorf("expected empty output, got %q", buf.String())
+	}
+}
+
+// TestChangedModules_JSONFlag verifies --json outputs a JSON array of modules.
+func TestChangedModules_JSONFlag(t *testing.T) {
+	input := strings.NewReader("platform/ci-checks/main.go\n")
+	var buf bytes.Buffer
+	err := cmdChangedModules(input, &buf, []string{"--json"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var out []string
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("failed to parse JSON: %v\nraw: %s", err, buf.String())
+	}
+	want := []string{"platform/ci-checks"}
+	if !reflect.DeepEqual(out, want) {
+		t.Errorf("json output = %v, want %v", out, want)
+	}
+}
+
+// TestChangedModules_JSONFlag_Empty verifies --json with no platform paths outputs an empty JSON array.
+func TestChangedModules_JSONFlag_Empty(t *testing.T) {
+	input := strings.NewReader("")
+	var buf bytes.Buffer
+	err := cmdChangedModules(input, &buf, []string{"--json"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var out []string
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("failed to parse JSON: %v\nraw: %s", err, buf.String())
+	}
+	if len(out) != 0 {
+		t.Errorf("expected empty JSON array, got %v", out)
+	}
+}
+
+// TestRun_ChangedModules_DispatchWorks verifies the run() dispatcher routes changed-modules correctly.
+func TestRun_ChangedModules_DispatchWorks(t *testing.T) {
+	err := run([]string{"changed-modules"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("unexpected error dispatching changed-modules: %v", err)
+	}
+}
