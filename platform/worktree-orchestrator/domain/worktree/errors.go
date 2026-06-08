@@ -1,10 +1,9 @@
 // Package worktree contains the pure domain logic for the worktree-orchestrator.
-// Zero I/O, zero third-party imports.
 package worktree
 
 import "fmt"
 
-// ErrInvalidFigure is returned when a figura string is not in the CONSTITUTION §1 roster.
+// ErrInvalidFigure is returned when a figura string is not in the agent roster.
 type ErrInvalidFigure struct {
 	Figura string
 }
@@ -51,10 +50,7 @@ func (e *ErrWorktreeNotFound) Error() string {
 	return fmt.Sprintf("worktree for figura %q not found at %q", e.Figura, e.Path)
 }
 
-// ErrDirtyWorktree is returned when a worktree has uncommitted changes and --force
-// was not supplied. Figura is always set by the service (never the adapter).
-// FileCount is the number of dirty files reported by git status --porcelain;
-// zero means the count was not available (best-effort, REQ-TEARDOWN-2,3).
+// ErrDirtyWorktree is returned when a worktree has uncommitted changes and --force was not supplied.
 type ErrDirtyWorktree struct {
 	Figura    string
 	Path      string
@@ -69,13 +65,10 @@ func (e *ErrDirtyWorktree) Error() string {
 	return fmt.Sprintf("worktree for figura %q at %q has uncommitted changes; use --force to override", e.Figura, e.Path)
 }
 
-// ErrDirtyWorktreeSentinel is the adapter-level sentinel returned by
-// WorktreeRemove when git refuses to remove a dirty worktree. It carries
-// the path and optional file count but NOT the figura — the service is
-// responsible for wrapping this into ErrDirtyWorktree with the correct figura.
+// ErrDirtyWorktreeSentinel is the adapter-level sentinel for a dirty worktree; the service enriches it with the figura.
 type ErrDirtyWorktreeSentinel struct {
 	Path      string
-	FileCount int // 0 = count not available
+	FileCount int
 }
 
 func (e *ErrDirtyWorktreeSentinel) Error() string {

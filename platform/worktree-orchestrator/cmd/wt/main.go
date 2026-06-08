@@ -1,7 +1,4 @@
 // Command wt is the composition root for the worktree-orchestrator module.
-// It wires the gitcli adapter, the service orchestrator, and the domain
-// together. All real I/O is confined to this package (hexagonal architecture,
-// design §3 + §10).
 //
 // Usage:
 //
@@ -34,7 +31,6 @@ func main() {
 	}
 }
 
-// run is the testable entry point. Returns a non-nil error on any failure.
 func run(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("subcommand required: create | list | teardown | env")
@@ -53,7 +49,6 @@ func run(args []string) error {
 	}
 }
 
-// exitCodeFor maps typed domain errors to exit codes. All errors → 1 (REQ-ERR-4).
 func exitCodeFor(err error) int {
 	if err == nil {
 		return 0
@@ -61,12 +56,6 @@ func exitCodeFor(err error) int {
 	return 1
 }
 
-// ---------------------------------------------------------------------------
-// Composition root helpers
-// ---------------------------------------------------------------------------
-
-// repoRoot resolves the git repository root via `git rev-parse --show-toplevel`.
-// Falls back to os.Getwd if git is unavailable or not in a repo.
 func repoRoot() string {
 	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
 	if err == nil {
@@ -76,8 +65,6 @@ func repoRoot() string {
 	return wd
 }
 
-// newOrchestrator builds a fully-wired Orchestrator using the gitcli adapter.
-// WriteFile defaults to os.WriteFile (ADR-D7 — already wired in NewOrchestrator).
 func newOrchestrator() *service.Orchestrator {
 	root := repoRoot()
 	cfg := service.DefaultTALConfig()
@@ -85,10 +72,6 @@ func newOrchestrator() *service.Orchestrator {
 	runner := gitcli.NewRunner(root)
 	return service.NewOrchestrator(runner, cfg)
 }
-
-// ---------------------------------------------------------------------------
-// create subcommand
-// ---------------------------------------------------------------------------
 
 func cmdCreate(args []string) error {
 	fs := flag.NewFlagSet("create", flag.ContinueOnError)
@@ -111,11 +94,6 @@ func cmdCreate(args []string) error {
 	return o.Create(ctx, figura, jiraKey, *noFetch)
 }
 
-// ---------------------------------------------------------------------------
-// list subcommand
-// ---------------------------------------------------------------------------
-
-// listEntry is the JSON-serialisable representation of a worktree for --json output.
 type listEntry struct {
 	Figura string `json:"figura"`
 	Branch string `json:"branch"`
@@ -124,8 +102,6 @@ type listEntry struct {
 	Status string `json:"status"`
 }
 
-// parseFiguraFromBranch extracts the figura from a branch name of the form
-// agent/<figura>/<TAL-N>. Returns the branch itself if pattern doesn't match.
 func parseFiguraFromBranch(branch string) string {
 	parts := strings.SplitN(branch, "/", 3)
 	if len(parts) == 3 && parts[0] == "agent" {
@@ -190,14 +166,10 @@ func renderListTabular(statuses []service.WorktreeStatus) error {
 	return w.Flush()
 }
 
-// ---------------------------------------------------------------------------
-// teardown subcommand
-// ---------------------------------------------------------------------------
-
 func cmdTeardown(args []string) error {
 	fs := flag.NewFlagSet("teardown", flag.ContinueOnError)
 	force := fs.Bool("force", false, "Remove dirty worktree (warns to stderr)")
-	deleteBranch := fs.Bool("delete-branch", false, "Delete the branch after teardown (safe git branch -d, ADR-D2)")
+	deleteBranch := fs.Bool("delete-branch", false, "Delete the branch after teardown (safe git branch -d)")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -219,7 +191,6 @@ func cmdTeardown(args []string) error {
 	ctx := context.Background()
 	err := o.Teardown(ctx, figura, jiraKey, *force, *deleteBranch)
 	if err != nil {
-		// Surface dirty worktree hint if applicable
 		var dirty *worktree.ErrDirtyWorktree
 		if errors.As(err, &dirty) {
 			fmt.Fprintf(os.Stderr, "wt: worktree has uncommitted changes; re-run with --force to override\n")
@@ -228,10 +199,6 @@ func cmdTeardown(args []string) error {
 	}
 	return nil
 }
-
-// ---------------------------------------------------------------------------
-// env subcommand
-// ---------------------------------------------------------------------------
 
 func cmdEnv(args []string) error {
 	fs := flag.NewFlagSet("env", flag.ContinueOnError)
