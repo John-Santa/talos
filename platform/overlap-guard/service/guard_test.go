@@ -312,6 +312,31 @@ func TestGuard_CheckPreAssignment_NoOverlap_OK(t *testing.T) {
 	}
 }
 
+// W-01 RED: issue with missing checklist → report.Advisories non-empty (REQ-CHECKLIST-4).
+func TestGuard_CheckPreAssignment_MissingChecklist_PopulatesAdvisories(t *testing.T) {
+	t.Parallel()
+
+	searcher := mock.NewIssueSearcherMock()
+	searcher.DefaultResult = []port.IssueResult{
+		{
+			Key:    "TAL-99",
+			Labels: []string{"module:core", "agent:hermes"},
+			Body:   "No checklist here.",
+		},
+	}
+	cfg := service.DefaultTALConfig()
+
+	g := service.NewGuard(searcher, nil, nil, cfg)
+	report, err := g.CheckPreAssignment(context.Background(), "core", "atlas", []string{"a.go"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(report.Advisories) == 0 {
+		t.Error("Advisories must be non-empty when at least one issue has no checklist (REQ-CHECKLIST-4)")
+	}
+}
+
 func TestGuard_CheckPreAssignment_GitNotCalled(t *testing.T) {
 	t.Parallel()
 
