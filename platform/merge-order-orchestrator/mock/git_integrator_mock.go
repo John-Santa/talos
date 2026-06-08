@@ -41,6 +41,18 @@ func (m *GitIntegratorMock) CallsFor(method string) []Call {
 	return out
 }
 
+// AssertCallCount reports an error via t if method was not called exactly n times.
+func (m *GitIntegratorMock) AssertCallCount(t interface {
+	Helper()
+	Errorf(string, ...any)
+}, method string, n int) {
+	t.Helper()
+	got := len(m.CallsFor(method))
+	if got != n {
+		t.Errorf("mock: %s called %d time(s), want %d", method, got, n)
+	}
+}
+
 // AssertMethodOrder checks that the mock's overall call history matches the given ordered method names exactly.
 func (m *GitIntegratorMock) AssertMethodOrder(t interface {
 	Helper()
