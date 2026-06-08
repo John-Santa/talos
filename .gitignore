@@ -35,3 +35,4 @@ talos.wt/
 /platform/jira-evidence-loop/evidence
 /platform/worktree-orchestrator/wt
 /platform/merge-order-orchestrator/mo
+/platform/overlap-guard/ov

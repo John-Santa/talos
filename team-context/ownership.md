@@ -38,3 +38,4 @@
 | `.env.example` | HERMES | Template raíz para vars de worktree; sin credenciales Jira reales |
 | `platform/worktree-orchestrator/**` | HERMES | CLI `wt`, dominio, servicio, adapter gitcli |
 | `platform/merge-order-orchestrator/**` | HERMES | CLI `mo`, orden/integración de merge |
+| `platform/overlap-guard/**` | THEMIS | CLI `ov`, guard de solapamiento (module:qa) |
