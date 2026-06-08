@@ -12,17 +12,12 @@ import (
 	"github.com/John-Santa/talos/platform/worktree-orchestrator/service"
 )
 
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
-
 func defaultCfg() service.Config {
 	cfg := service.DefaultTALConfig()
 	cfg.RepoRoot = "/repo"
 	return cfg
 }
 
-// fakeWriteFile captures the path and data passed to WriteFile.
 type fakeWriteFile struct {
 	path string
 	data []byte
@@ -35,22 +30,17 @@ func (f *fakeWriteFile) write(path string, data []byte, perm fs.FileMode) error 
 	return f.err
 }
 
-// newOrchestrator builds an orchestrator using the mock runner and a fake WriteFile.
 func newOrchestrator(runner *mock.GitRunnerMock, wf *fakeWriteFile) *service.Orchestrator {
 	o := service.NewOrchestrator(runner, defaultCfg())
 	o.WriteFile = wf.write
 	return o
 }
 
-// ---------------------------------------------------------------------------
-// Create — happy path
-// ---------------------------------------------------------------------------
-
 func TestCreate_HappyPath(t *testing.T) {
 	t.Parallel()
 	runner := mock.NewGitRunnerMock()
 	runner.BranchExistsResult = false
-	runner.WorktreeListResult = "" // no existing worktrees
+	runner.WorktreeListResult = ""
 	wf := &fakeWriteFile{}
 	o := newOrchestrator(runner, wf)
 
@@ -60,16 +50,13 @@ func TestCreate_HappyPath(t *testing.T) {
 		t.Fatalf("Create() unexpected error: %v", err)
 	}
 
-	// Call order: BranchExists → WorktreeList → Fetch → WorktreeAdd
 	runner.AssertMethodOrder(t, "BranchExists", "WorktreeList", "Fetch", "WorktreeAdd")
 
-	// WriteFile must have been called with the .env content at the correct path
 	wantPath := "talos.wt/agent-hermes/.env"
 	if wf.path != wantPath {
 		t.Errorf("WriteFile path = %q, want %q", wf.path, wantPath)
 	}
 
-	// .env content must be byte-identical to RenderEnv output
 	spec, _ := worktree.NewWorktreeSpec("hermes", "TAL-2", "talos.wt")
 	res, _ := worktree.AgentResources(spec.Figura)
 	wantContent := worktree.RenderEnv(spec, res)
@@ -77,10 +64,6 @@ func TestCreate_HappyPath(t *testing.T) {
 		t.Errorf("WriteFile data =\n%q\nwant:\n%q", string(wf.data), wantContent)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Create — --no-fetch: Fetch must NOT be called
-// ---------------------------------------------------------------------------
 
 func TestCreate_NoFetch(t *testing.T) {
 	t.Parallel()
@@ -91,19 +74,14 @@ func TestCreate_NoFetch(t *testing.T) {
 	o := newOrchestrator(runner, wf)
 
 	ctx := context.Background()
-	err := o.Create(ctx, "atlas", "TAL-1", true /* noFetch */)
+	err := o.Create(ctx, "atlas", "TAL-1", true)
 	if err != nil {
 		t.Fatalf("Create(noFetch=true) unexpected error: %v", err)
 	}
 
-	// Fetch must NOT appear in the call log
 	runner.AssertNotCalled(t, "Fetch")
 	runner.AssertMethodOrder(t, "BranchExists", "WorktreeList", "WorktreeAdd")
 }
-
-// ---------------------------------------------------------------------------
-// Create — validation failures stop before any runner call
-// ---------------------------------------------------------------------------
 
 func TestCreate_InvalidFigura(t *testing.T) {
 	t.Parallel()
@@ -124,6 +102,7 @@ func TestCreate_InvalidFigura(t *testing.T) {
 	}
 }
 
+
 func TestCreate_InvalidJiraKey(t *testing.T) {
 	t.Parallel()
 	runner := mock.NewGitRunnerMock()
@@ -143,14 +122,10 @@ func TestCreate_InvalidJiraKey(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Create — pre-check failures
-// ---------------------------------------------------------------------------
-
 func TestCreate_BranchExists(t *testing.T) {
 	t.Parallel()
 	runner := mock.NewGitRunnerMock()
-	runner.BranchExistsResult = true // branch already exists
+	runner.BranchExistsResult = true
 	wf := &fakeWriteFile{}
 	o := newOrchestrator(runner, wf)
 
@@ -169,7 +144,6 @@ func TestCreate_WorktreeAlreadyExists(t *testing.T) {
 	t.Parallel()
 	runner := mock.NewGitRunnerMock()
 	runner.BranchExistsResult = false
-	// Existing worktree at the path that would be created for hermes
 	runner.WorktreeListResult = "worktree /repo\n" +
 		"HEAD abc\n" +
 		"branch refs/heads/develop\n" +
@@ -192,10 +166,6 @@ func TestCreate_WorktreeAlreadyExists(t *testing.T) {
 	runner.AssertNotCalled(t, "WorktreeAdd")
 }
 
-// ---------------------------------------------------------------------------
-// Create — mid-sequence failure
-// ---------------------------------------------------------------------------
-
 func TestCreate_WorktreeAddFailure(t *testing.T) {
 	t.Parallel()
 	runner := mock.NewGitRunnerMock()
@@ -209,15 +179,10 @@ func TestCreate_WorktreeAddFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from WorktreeAdd failure, got nil")
 	}
-	// WriteFile must NOT have been called
 	if wf.path != "" {
 		t.Errorf("WriteFile was called with path %q after WorktreeAdd failure", wf.path)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Create — WriteFile failure: partial state reported
-// ---------------------------------------------------------------------------
 
 func TestCreate_WriteFileFailure(t *testing.T) {
 	t.Parallel()
@@ -231,21 +196,13 @@ func TestCreate_WriteFileFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from WriteFile failure, got nil")
 	}
-	// The error must mention partial state or .env write failure
 	if !strings.Contains(err.Error(), ".env") && !strings.Contains(err.Error(), "partial") {
 		t.Errorf("error %q should mention .env or partial state", err.Error())
 	}
 }
 
-// ---------------------------------------------------------------------------
-// List — REQ-LIST-4: status taxonomy active/orphan/stale
-// ---------------------------------------------------------------------------
-
-// TestList_Active verifies that a worktree whose branch still exists and whose
-// directory exists on disk is classified as "active".
 func TestList_Active(t *testing.T) {
 	t.Parallel()
-	// Use a real directory so the disk-existence check passes.
 	wtDir := t.TempDir()
 	runner := mock.NewGitRunnerMock()
 	runner.WorktreeListResult = "worktree /repo\n" +
@@ -256,7 +213,6 @@ func TestList_Active(t *testing.T) {
 		"HEAD def\n" +
 		"branch refs/heads/agent/atlas/TAL-1\n" +
 		"\n"
-	// Branch exists → active (not orphan)
 	runner.BranchExistsResultsByBranch = map[string]bool{
 		"agent/atlas/TAL-1": true,
 	}
@@ -278,11 +234,8 @@ func TestList_Active(t *testing.T) {
 	}
 }
 
-// TestList_Orphan verifies that a worktree whose directory exists but whose
-// branch has been deleted (merged/pruned) is classified as "orphan".
 func TestList_Orphan(t *testing.T) {
 	t.Parallel()
-	// Use a real directory so the disk-existence check passes (not stale).
 	wtDir := t.TempDir()
 	runner := mock.NewGitRunnerMock()
 	runner.WorktreeListResult = "worktree /repo\n" +
@@ -293,7 +246,6 @@ func TestList_Orphan(t *testing.T) {
 		"HEAD def\n" +
 		"branch refs/heads/agent/atlas/TAL-1\n" +
 		"\n"
-	// Branch does NOT exist → orphan (merged/deleted)
 	runner.BranchExistsResultsByBranch = map[string]bool{
 		"agent/atlas/TAL-1": false,
 	}
@@ -312,17 +264,13 @@ func TestList_Orphan(t *testing.T) {
 	}
 }
 
-// TestList_Stale verifies that a worktree whose path does not exist on disk
-// is classified as "stale" (prunable) regardless of branch existence.
 func TestList_Stale(t *testing.T) {
 	t.Parallel()
 	runner := mock.NewGitRunnerMock()
-	// Use a path guaranteed not to exist on disk
 	runner.WorktreeListResult = "worktree /nonexistent-path-stale-9f3d\n" +
 		"HEAD abc\n" +
 		"branch refs/heads/agent/hermes/TAL-99\n" +
 		"\n"
-	// Branch may or may not exist for stale — disk check takes priority
 	runner.BranchExistsResultsByBranch = map[string]bool{
 		"agent/hermes/TAL-99": true,
 	}
@@ -341,9 +289,6 @@ func TestList_Stale(t *testing.T) {
 	}
 }
 
-// TestList_NoDetachedStatus verifies that "detached" is NOT a valid output
-// status — detached HEAD worktrees are either orphan (no branch ref) or
-// active (path exists), never a separate "detached" status value.
 func TestList_NoDetachedStatus(t *testing.T) {
 	t.Parallel()
 	runner := mock.NewGitRunnerMock()
@@ -366,10 +311,6 @@ func TestList_NoDetachedStatus(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Teardown — happy path (default: no delete-branch)
-// ---------------------------------------------------------------------------
-
 func TestTeardown_HappyPath(t *testing.T) {
 	t.Parallel()
 	runner := mock.NewGitRunnerMock()
@@ -389,14 +330,9 @@ func TestTeardown_HappyPath(t *testing.T) {
 		t.Fatalf("Teardown() unexpected error: %v", err)
 	}
 
-	// Call order: WorktreeList → WorktreeRemove → Prune
 	runner.AssertMethodOrder(t, "WorktreeList", "WorktreeRemove", "Prune")
 	runner.AssertNotCalled(t, "BranchDelete")
 }
-
-// ---------------------------------------------------------------------------
-// Teardown — --delete-branch: BranchDelete IS called after Prune
-// ---------------------------------------------------------------------------
 
 func TestTeardown_DeleteBranch(t *testing.T) {
 	t.Parallel()
@@ -412,18 +348,13 @@ func TestTeardown_DeleteBranch(t *testing.T) {
 	wf := &fakeWriteFile{}
 	o := newOrchestrator(runner, wf)
 
-	err := o.Teardown(context.Background(), "hermes", "TAL-2", false, true /* deleteBranch */)
+	err := o.Teardown(context.Background(), "hermes", "TAL-2", false, true)
 	if err != nil {
 		t.Fatalf("Teardown(deleteBranch=true) unexpected error: %v", err)
 	}
 
-	// BranchDelete MUST appear after Prune
 	runner.AssertMethodOrder(t, "WorktreeList", "WorktreeRemove", "Prune", "BranchDelete")
 }
-
-// ---------------------------------------------------------------------------
-// Teardown — --force: WorktreeRemove receives force=true
-// ---------------------------------------------------------------------------
 
 func TestTeardown_Force(t *testing.T) {
 	t.Parallel()
@@ -435,7 +366,7 @@ func TestTeardown_Force(t *testing.T) {
 	wf := &fakeWriteFile{}
 	o := newOrchestrator(runner, wf)
 
-	err := o.Teardown(context.Background(), "hermes", "TAL-2", true /* force */, false)
+	err := o.Teardown(context.Background(), "hermes", "TAL-2", true, false)
 	if err != nil {
 		t.Fatalf("Teardown(force=true) unexpected error: %v", err)
 	}
@@ -450,14 +381,10 @@ func TestTeardown_Force(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Teardown — ErrWorktreeNotFound
-// ---------------------------------------------------------------------------
-
 func TestTeardown_NotFound(t *testing.T) {
 	t.Parallel()
 	runner := mock.NewGitRunnerMock()
-	runner.WorktreeListResult = "" // no worktrees
+	runner.WorktreeListResult = ""
 	wf := &fakeWriteFile{}
 	o := newOrchestrator(runner, wf)
 
@@ -472,14 +399,10 @@ func TestTeardown_NotFound(t *testing.T) {
 	runner.AssertNotCalled(t, "WorktreeRemove")
 }
 
-// ---------------------------------------------------------------------------
-// Env — ErrWorktreeNotFound
-// ---------------------------------------------------------------------------
-
 func TestEnv_NotFound(t *testing.T) {
 	t.Parallel()
 	runner := mock.NewGitRunnerMock()
-	runner.WorktreeListResult = "" // no worktrees
+	runner.WorktreeListResult = ""
 	wf := &fakeWriteFile{}
 	o := newOrchestrator(runner, wf)
 
@@ -495,10 +418,6 @@ func TestEnv_NotFound(t *testing.T) {
 		t.Error("WriteFile should not have been called when worktree not found")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Env — happy path: WriteFile receives byte-identical RenderEnv output
-// ---------------------------------------------------------------------------
 
 func TestEnv_HappyPath(t *testing.T) {
 	t.Parallel()
@@ -519,12 +438,10 @@ func TestEnv_HappyPath(t *testing.T) {
 		t.Fatalf("Env() unexpected error: %v", err)
 	}
 
-	// WriteFile must have been called
 	if wf.path == "" {
 		t.Fatal("WriteFile was not called")
 	}
 
-	// Content must be byte-identical to RenderEnv (idempotency proof)
 	spec, _ := worktree.NewWorktreeSpec("hermes", "TAL-2", "talos.wt")
 	res, _ := worktree.AgentResources(spec.Figura)
 	wantContent := worktree.RenderEnv(spec, res)
@@ -532,19 +449,11 @@ func TestEnv_HappyPath(t *testing.T) {
 		t.Errorf("WriteFile data =\n%q\nwant (RenderEnv output):\n%q", string(wf.data), wantContent)
 	}
 
-	// No JIRA_ in content (Decision 5 guard, belt+suspenders)
 	if strings.Contains(string(wf.data), "JIRA_") {
 		t.Errorf("env content contains JIRA_ — Decision 5 violation: %s", string(wf.data))
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Teardown — W-4: ErrDirtyWorktree must carry the figura (REQ-TEARDOWN-2,3)
-// ---------------------------------------------------------------------------
-
-// TestTeardown_Dirty_HasFigura verifies that when the adapter refuses to
-// remove a dirty worktree, the service wraps the error into ErrDirtyWorktree
-// with the correct figura (not empty string).
 func TestTeardown_Dirty_HasFigura(t *testing.T) {
 	t.Parallel()
 	runner := mock.NewGitRunnerMock()
@@ -556,7 +465,6 @@ func TestTeardown_Dirty_HasFigura(t *testing.T) {
 		"HEAD def\n" +
 		"branch refs/heads/agent/hermes/TAL-2\n" +
 		"\n"
-	// Adapter returns sentinel "dirty" error — no figura in it
 	runner.WorktreeRemoveErr = mock.ErrDirtyWorktreeSentinel("talos.wt/agent-hermes")
 	wf := &fakeWriteFile{}
 	o := newOrchestrator(runner, wf)
@@ -570,19 +478,14 @@ func TestTeardown_Dirty_HasFigura(t *testing.T) {
 	if !errors.As(err, &dirty) {
 		t.Fatalf("error type = %T, want *ErrDirtyWorktree; err = %v", err, err)
 	}
-	// The service MUST enrich the error with the figura
 	if dirty.Figura != "hermes" {
 		t.Errorf("ErrDirtyWorktree.Figura = %q, want %q", dirty.Figura, "hermes")
 	}
-	// Path must also be set
 	if dirty.Path == "" {
 		t.Errorf("ErrDirtyWorktree.Path is empty, want non-empty")
 	}
 }
 
-// TestTeardown_Dirty_FileCount verifies that when file-count is available,
-// ErrDirtyWorktree.FileCount is > 0. This test uses a mock that sets
-// WorktreeRemoveFileCount to simulate the adapter reporting a count.
 func TestTeardown_Dirty_FileCount(t *testing.T) {
 	t.Parallel()
 	runner := mock.NewGitRunnerMock()
@@ -594,7 +497,6 @@ func TestTeardown_Dirty_FileCount(t *testing.T) {
 		"HEAD def\n" +
 		"branch refs/heads/agent/hermes/TAL-2\n" +
 		"\n"
-	// Adapter returns sentinel with a file count of 3
 	runner.WorktreeRemoveErr = mock.ErrDirtyWorktreeSentinelWithCount("talos.wt/agent-hermes", 3)
 	wf := &fakeWriteFile{}
 	o := newOrchestrator(runner, wf)

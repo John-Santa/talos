@@ -1,5 +1,4 @@
 // Package mock provides hand-written test doubles for the port interfaces.
-// Zero third-party dependencies — uses only the stdlib testing package.
 package mock
 
 import (
@@ -16,27 +15,16 @@ type Call struct {
 }
 
 // GitRunnerMock is a hand-written test double implementing port.GitRunner.
-// It records all calls made in order and returns pre-programmed results.
-//
-// Usage:
-//
-//	m := mock.NewGitRunnerMock()
-//	m.WorktreeListResult = "worktree /some/path\n..."
-//	// inject m into service, run, inspect m.Calls
+// It records all calls in order and returns pre-programmed results.
 type GitRunnerMock struct {
 	// Calls is the ordered list of all method invocations received.
 	Calls []Call
 
-	// Programmable return values — set before the test runs.
 	FetchErr error
 
-	// BranchExistsResult is the fallback result for BranchExists when
-	// BranchExistsResultsByBranch is nil or does not contain the branch.
-	BranchExistsResult bool
-	BranchExistsErr    error
-	// BranchExistsResultsByBranch allows per-branch BranchExists results.
-	// When set, the mock looks up the branch name; if not found it falls back
-	// to BranchExistsResult.
+	// BranchExistsResult is the fallback when BranchExistsResultsByBranch does not contain the branch.
+	BranchExistsResult          bool
+	BranchExistsErr             error
 	BranchExistsResultsByBranch map[string]bool
 
 	WorktreeAddErr error
@@ -51,14 +39,12 @@ type GitRunnerMock struct {
 	BranchDeleteErr error
 }
 
-// ErrDirtyWorktreeSentinel returns an *worktree.ErrDirtyWorktreeSentinel for
-// use in tests that need the adapter to signal a dirty worktree without a figura.
+// ErrDirtyWorktreeSentinel returns an ErrDirtyWorktreeSentinel for tests that need the adapter to signal a dirty worktree.
 func ErrDirtyWorktreeSentinel(path string) error {
 	return &worktree.ErrDirtyWorktreeSentinel{Path: path}
 }
 
-// ErrDirtyWorktreeSentinelWithCount returns an *worktree.ErrDirtyWorktreeSentinel
-// with a file count, for tests that verify REQ-TEARDOWN-2,3 file-count reporting.
+// ErrDirtyWorktreeSentinelWithCount returns an ErrDirtyWorktreeSentinel with a file count.
 func ErrDirtyWorktreeSentinelWithCount(path string, count int) error {
 	return &worktree.ErrDirtyWorktreeSentinel{Path: path, FileCount: count}
 }
@@ -95,8 +81,7 @@ func (m *GitRunnerMock) AssertCallCount(t interface {
 	}
 }
 
-// AssertMethodOrder checks that the mock's overall call history matches the
-// given ordered method names exactly (ordered list, exact count).
+// AssertMethodOrder checks that the mock's overall call history matches the given ordered method names exactly.
 func (m *GitRunnerMock) AssertMethodOrder(t interface {
 	Helper()
 	Errorf(string, ...any)
@@ -132,10 +117,6 @@ func methodNames(calls []Call) []string {
 	}
 	return names
 }
-
-// ---------------------------------------------------------------------------
-// port.GitRunner implementation
-// ---------------------------------------------------------------------------
 
 func (m *GitRunnerMock) Fetch(_ context.Context) error {
 	m.record("Fetch")
@@ -177,9 +158,6 @@ func (m *GitRunnerMock) BranchDelete(_ context.Context, branch string) error {
 	return m.BranchDeleteErr
 }
 
-// Compile-time assertion: GitRunnerMock must satisfy port.GitRunner.
-// We do this via an inline interface to avoid importing port in this package
-// (keeping mock free of circular dependencies, mirroring jira-evidence-loop pattern).
 var _ interface {
 	Fetch(context.Context) error
 	BranchExists(context.Context, string) (bool, error)

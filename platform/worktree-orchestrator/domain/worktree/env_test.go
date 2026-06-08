@@ -8,14 +8,9 @@ import (
 	"github.com/John-Santa/talos/platform/worktree-orchestrator/domain/worktree"
 )
 
-// ---------------------------------------------------------------------------
-// AgentResources — exhaustive tabla (REQ-ASSIGN-1)
-// ---------------------------------------------------------------------------
-
 func TestAgentResources(t *testing.T) {
 	t.Parallel()
 
-	// Expected values per REQ-ASSIGN-1: ports 8100-8107, schema wt_<figura>
 	tests := []struct {
 		figura     string
 		wantPort   int
@@ -62,10 +57,6 @@ func TestAgentResources(t *testing.T) {
 	})
 }
 
-// ---------------------------------------------------------------------------
-// Disjoint regression — all 8 ports and schemas must be unique (REQ-ASSIGN-3)
-// ---------------------------------------------------------------------------
-
 func TestAgentResourcesDisjoint(t *testing.T) {
 	t.Parallel()
 	figuras := []worktree.Figura{
@@ -92,10 +83,6 @@ func TestAgentResourcesDisjoint(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// RenderEnv — golden string + no JIRA_ guard (REQ-ENV-1..3, Decision 5)
-// ---------------------------------------------------------------------------
-
 func TestRenderEnv(t *testing.T) {
 	t.Parallel()
 
@@ -112,19 +99,15 @@ func TestRenderEnv(t *testing.T) {
 
 	got := worktree.RenderEnv(spec, res)
 
-	// Assert exact byte content: PORT + DB_SCHEMA lines only
 	want := "PORT=8106\nDB_SCHEMA=wt_hermes\n"
 	if got != want {
 		t.Errorf("RenderEnv() =\n%q\nwant:\n%q", got, want)
 	}
 
-	// Decision 5 guard: no JIRA_ credentials in the generated file
 	if strings.Contains(got, "JIRA_") {
 		t.Errorf("RenderEnv() output contains JIRA_ credential — Decision 5 violation:\n%s", got)
 	}
 
-	// Determinism: calling RenderEnv twice with the same inputs must produce
-	// byte-identical output (ADR-D6 + REQ-ENV-3).
 	got2 := worktree.RenderEnv(spec, res)
 	if got != got2 {
 		t.Errorf("RenderEnv() is not deterministic:\nfirst:  %q\nsecond: %q", got, got2)

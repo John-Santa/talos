@@ -6,10 +6,6 @@ import (
 	"github.com/John-Santa/talos/platform/worktree-orchestrator/domain/worktree"
 )
 
-// ---------------------------------------------------------------------------
-// ParseWorktreeList — fixture-based table-driven tests
-// ---------------------------------------------------------------------------
-
 func TestParseWorktreeList(t *testing.T) {
 	t.Parallel()
 

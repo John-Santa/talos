@@ -5,10 +5,9 @@ import (
 	"regexp"
 )
 
-// Figura is the validated name of an agent from the CONSTITUTION §1 roster.
+// Figura is the validated name of an agent.
 type Figura string
 
-// roster is the authoritative list of valid figura values (CONSTITUTION §1).
 var roster = map[string]struct{}{
 	"atlas":      {},
 	"hephaestus": {},
@@ -20,11 +19,9 @@ var roster = map[string]struct{}{
 	"argos":      {},
 }
 
-// jiraKeyRe matches valid Jira keys: TAL-<n> where n >= 1 (no leading zeros, no zero).
 var jiraKeyRe = regexp.MustCompile(`^TAL-[1-9][0-9]*$`)
 
-// ParseFigura validates and returns a Figura from a raw string.
-// Returns ErrInvalidFigure if the string is not in the CONSTITUTION §1 roster.
+// ParseFigura validates s against the agent roster and returns a Figura, or ErrInvalidFigure.
 func ParseFigura(s string) (Figura, error) {
 	if _, ok := roster[s]; !ok {
 		return "", &ErrInvalidFigure{Figura: s}
@@ -32,8 +29,7 @@ func ParseFigura(s string) (Figura, error) {
 	return Figura(s), nil
 }
 
-// ValidateJiraKey checks that key matches the TAL-<n> pattern (n >= 1).
-// Returns ErrInvalidKey if it does not match.
+// ValidateJiraKey checks that key matches TAL-<n> (n >= 1), returning ErrInvalidKey if not.
 func ValidateJiraKey(key string) error {
 	if !jiraKeyRe.MatchString(key) {
 		return &ErrInvalidKey{Key: key}
@@ -41,14 +37,12 @@ func ValidateJiraKey(key string) error {
 	return nil
 }
 
-// BranchName returns the canonical branch name for a given figura and jira key.
-// Format: agent/<figura>/<TAL-N>
+// BranchName returns the canonical branch name agent/<figura>/<TAL-N>.
 func BranchName(f Figura, jiraKey string) string {
 	return fmt.Sprintf("agent/%s/%s", f, jiraKey)
 }
 
-// WorktreePath returns the filesystem path for a worktree given a base directory
-// and figura. Format: <base>/agent-<figura>
+// WorktreePath returns the filesystem path <base>/agent-<figura> for a worktree.
 func WorktreePath(base string, f Figura) string {
 	return fmt.Sprintf("%s/agent-%s", base, f)
 }
@@ -61,9 +55,7 @@ type WorktreeSpec struct {
 	Path    string
 }
 
-// NewWorktreeSpec validates figura and jiraKey, then builds and returns a
-// WorktreeSpec with pre-derived Branch and Path fields.
-// Returns ErrInvalidFigura or ErrInvalidKey on validation failure.
+// NewWorktreeSpec validates figura and jiraKey, then builds a WorktreeSpec with pre-derived Branch and Path.
 func NewWorktreeSpec(figura, jiraKey, worktreeBase string) (WorktreeSpec, error) {
 	f, err := ParseFigura(figura)
 	if err != nil {
