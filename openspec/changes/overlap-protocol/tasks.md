@@ -83,12 +83,12 @@ Chain strategy: pending
 
 > Req: REQ-JIRA-1–4, REQ-READINESS-1–5, REQ-SCAN-1, REQ-FETCH-1–2, REQ-TEST-6
 
-- [ ] D.1 **RED** `adapter/jirarest/client_test.go` — `httptest.Server` con respuesta ADF; verifica que el adapter pide `["summary","labels","description"]`, aplana ADF (depth-first, join `\n`), retorna `IssueResult` con `Body` plano; tests de I/O reales gateados con `testing.Short()`.
-- [ ] D.2 **GREEN** `adapter/jirarest/client.go` — `Client` (auth via env/flags `--site-url`/`--token`), `Search(ctx, jql, max)`, `adfNode{Type,Text string; Content []adfNode}` local (walk DFS), implementa `port.IssueSearcher`; `var _ port.IssueSearcher = (*Client)(nil)`.
-- [ ] D.3 **RED** `adapter/wtcli/lister_test.go` — mock del ejecutable + JSON bien formado; casos: JSON malformado→`ErrWtOutputMalformed`, binario ausente→`ErrWtBinaryNotFound`; tests reales gateados con `testing.Short()`.
-- [ ] D.4 **GREEN** `adapter/wtcli/lister.go` — `Lister` que shella `wt list --json`, parsea al DTO `port.WorktreeEntry`; `var _ port.WorktreeLister = (*Lister)(nil)`.
-- [ ] D.5 **RED** `adapter/gitcli/inspector_test.go` — casos: `ChangedFiles` formato correcto, `RevParse` HEAD, `Fetch` invocado/omitido; tests reales gateados con `testing.Short()`.
-- [ ] D.6 **GREEN** `adapter/gitcli/inspector.go` — auto-contenido (~50 ln): `Fetch`, `RevParse`, `ChangedFiles`; `var _ port.GitInspector = (*Inspector)(nil)`. NO importar `merge-order-orchestrator` (ADR-OV1).
+- [x] D.1 **RED** `adapter/jirarest/client_test.go` — `httptest.Server` con respuesta ADF; verifica que el adapter pide `["summary","labels","description"]`, aplana ADF (depth-first, join `\n`), retorna `IssueResult` con `Body` plano; tests de I/O reales gateados con `testing.Short()`.
+- [x] D.2 **GREEN** `adapter/jirarest/client.go` — `Client` (auth via env/flags `--site-url`/`--token`), `Search(ctx, jql, max)`, `adfNode{Type,Text string; Content []adfNode}` local (walk DFS), implementa `port.IssueSearcher`; `var _ port.IssueSearcher = (*Client)(nil)`.
+- [x] D.3 **RED** `adapter/wtcli/lister_test.go` — mock del ejecutable + JSON bien formado; casos: JSON malformado→`ErrWtOutputMalformed`, binario ausente→`ErrWtBinaryNotFound`; tests reales gateados con `testing.Short()`.
+- [x] D.4 **GREEN** `adapter/wtcli/lister.go` — `Lister` que shella `wt list --json`, parsea al DTO `port.WorktreeEntry`; `var _ port.WorktreeLister = (*Lister)(nil)`.
+- [x] D.5 **RED** `adapter/gitcli/inspector_test.go` — casos: `ChangedFiles` formato correcto, `RevParse` HEAD, `Fetch` invocado/omitido; tests reales gateados con `testing.Short()`.
+- [x] D.6 **GREEN** `adapter/gitcli/inspector.go` — auto-contenido (~50 ln): `Fetch`, `RevParse`, `ChangedFiles`; `var _ port.GitInspector = (*Inspector)(nil)`. NO importar `merge-order-orchestrator` (ADR-OV1).
 
 ---
 
@@ -96,8 +96,8 @@ Chain strategy: pending
 
 > Req: REQ-ERR-3–4, REQ-OUTPUT-1–4, REQ-METRIC-4–5, REQ-CHECK-3–4
 
-- [ ] E.1 **RED** `cmd/ov/main_test.go` — `run(args)` nivel: switch check/scan/metric, `exitCodeFor` (ErrNoClaims→0, ErrSameFileParallel→1, OverThreshold&&--strict→1), `--json` produce JSON válido a stdout, errores a stderr (REQ-OUTPUT-3–4).
-- [ ] E.2 **GREEN** `cmd/ov/main.go` — `run([]string) error`, switch manual `check`/`scan`/`metric`, `flag.NewFlagSet` por subcomando, `--json` via `json.NewEncoder(os.Stdout).SetIndent("","  ")`, `exitCodeFor`, `repoRoot()` via `RevParse`, composition root wire `jirarest`/`wtcli`/`gitcli` → `Guard`.
+- [x] E.1 **RED** `cmd/ov/main_test.go` — `run(args)` nivel: switch check/scan/metric, `exitCodeFor` (ErrNoClaims→0, ErrSameFileParallel→1, OverThreshold&&--strict→1), `--json` produce JSON válido a stdout, errores a stderr (REQ-OUTPUT-3–4).
+- [x] E.2 **GREEN** `cmd/ov/main.go` — `run([]string) error`, switch manual `check`/`scan`/`metric`, `flag.NewFlagSet` por subcomando, `--json` via `json.NewEncoder(os.Stdout).SetIndent("","  ")`, `exitCodeFor`, `repoRoot()` via `RevParse`, composition root wire `jirarest`/`wtcli`/`gitcli` → `Guard`.
 
 ---
 
@@ -105,10 +105,10 @@ Chain strategy: pending
 
 > Req: REQ-CLEANUP-1–2, REQ-READINESS-1 (go.mod)
 
-- [ ] F.1 `platform/overlap-guard/go.mod` — módulo `github.com/John-Santa/talos/platform/overlap-guard`, `go 1.26`, zero deps externos.
-- [ ] F.2 `team-context/ownership.md` — agregar fila `platform/overlap-guard/**` → THEMIS / module:qa / active en "Mapa archivo → módulo".
-- [ ] F.3 `.gitignore` — agregar `/platform/overlap-guard/ov` (binary nunca commiteado; REQ-CLEANUP-2).
-- [ ] F.4 Verificar `team-context/merge-order.md` referencia `main`→`develop`: si ya está limpio (fijado por #2 / TAL-3), NO modificar.
+- [x] F.1 `platform/overlap-guard/go.mod` — módulo `github.com/John-Santa/talos/platform/overlap-guard`, `go 1.26`, zero deps externos.
+- [x] F.2 `team-context/ownership.md` — agregar fila `platform/overlap-guard/**` → THEMIS / module:qa / active en "Mapa archivo → módulo".
+- [x] F.3 `.gitignore` — agregar `/platform/overlap-guard/ov` (binary nunca commiteado; REQ-CLEANUP-2).
+- [x] F.4 Verificar `team-context/merge-order.md` referencia `main`→`develop`: si ya está limpio (fijado por #2 / TAL-3), NO modificar.
 
 ---
 
