@@ -67,29 +67,46 @@ func repoRoot() string {
 	return wd
 }
 
-// checkJSON is the --json output shape for ov check and ov scan.
-type checkJSON struct {
-	Verdict         string              `json:"verdict"`
-	FileCollisions  []fileCollisionJSON `json:"file_collisions"`
-	ModuleOverlaps  []moduleOverlapJSON `json:"module_overlaps"`
-	Advisories      []string            `json:"advisories"`
-	CollisionRate   float64             `json:"collision_rate"`
-	Threshold       float64             `json:"threshold"`
-	OverThreshold   bool                `json:"over_threshold"`
-	PairsEvaluated  int                 `json:"pairs_evaluated"`
-	CollidingPairs  int                 `json:"colliding_pairs"`
-}
-
+// fileCollisionJSON is a single entry in file_collisions[]. agents[] contains both agent identifiers (REQ-OUTPUT-1).
 type fileCollisionJSON struct {
-	File   string `json:"file"`
-	AgentA string `json:"agent_a"`
-	AgentB string `json:"agent_b"`
+	File   string   `json:"file"`
+	Agents []string `json:"agents"`
 }
 
+// moduleOverlapJSON is a single entry in module_overlaps[]. agents[] contains both agent identifiers (REQ-OUTPUT-1).
 type moduleOverlapJSON struct {
-	Module string `json:"module"`
-	AgentA string `json:"agent_a"`
-	AgentB string `json:"agent_b"`
+	Module string   `json:"module"`
+	Agents []string `json:"agents"`
+}
+
+// checkOnlyJSON is the --json output shape for ov check (REQ-OUTPUT-1).
+// Scan-only fields (collision_rate, threshold, over_threshold, pairs_evaluated, colliding_pairs) are omitted.
+type checkOnlyJSON struct {
+	Verdict        string              `json:"verdict"`
+	FileCollisions []fileCollisionJSON `json:"file_collisions"`
+	ModuleOverlaps []moduleOverlapJSON `json:"module_overlaps"`
+	Advisories     []string            `json:"advisories"`
+}
+
+// scanOnlyJSON is the --json output shape for ov scan (REQ-OUTPUT-1).
+type scanOnlyJSON struct {
+	Verdict        string              `json:"verdict"`
+	CollisionRate  float64             `json:"collision_rate"`
+	PairsEvaluated int                 `json:"pairs_evaluated"`
+	CollidingPairs int                 `json:"colliding_pairs"`
+	FileCollisions []fileCollisionJSON `json:"file_collisions"`
+	ModuleOverlaps []moduleOverlapJSON `json:"module_overlaps"`
+	Advisories     []string            `json:"advisories"`
+}
+
+// metricOnlyJSON is the --json output shape for ov metric (REQ-OUTPUT-1).
+// verdict, file_collisions, module_overlaps, advisories are omitted — metric informs HG6 only.
+type metricOnlyJSON struct {
+	CollisionRate  float64 `json:"collision_rate"`
+	Threshold      float64 `json:"threshold"`
+	OverThreshold  bool    `json:"over_threshold"`
+	PairsEvaluated int     `json:"pairs_evaluated"`
+	CollidingPairs int     `json:"colliding_pairs"`
 }
 
 func verdictString(v overlap.Verdict) string {
@@ -103,40 +120,72 @@ func verdictString(v overlap.Verdict) string {
 	}
 }
 
-func reportToJSON(report overlap.Report, threshold float64) checkJSON {
-	out := checkJSON{
+func buildFileCollisions(report overlap.Report) []fileCollisionJSON {
+	fcs := make([]fileCollisionJSON, 0, len(report.FileCollisions))
+	for _, fc := range report.FileCollisions {
+		agents := []string{fc.A.Agent, fc.B.Agent}
+		if agents[0] > agents[1] {
+			agents[0], agents[1] = agents[1], agents[0]
+		}
+		fcs = append(fcs, fileCollisionJSON{File: fc.File, Agents: agents})
+	}
+	return fcs
+}
+
+func buildModuleOverlaps(report overlap.Report) []moduleOverlapJSON {
+	mos := make([]moduleOverlapJSON, 0, len(report.ModuleOverlaps))
+	for _, mo := range report.ModuleOverlaps {
+		agents := []string{mo.A.Agent, mo.B.Agent}
+		if agents[0] > agents[1] {
+			agents[0], agents[1] = agents[1], agents[0]
+		}
+		mos = append(mos, moduleOverlapJSON{Module: mo.Module, Agents: agents})
+	}
+	return mos
+}
+
+func advisoriesSlice(report overlap.Report) []string {
+	if report.Advisories != nil {
+		return report.Advisories
+	}
+	return []string{}
+}
+
+// reportToCheckJSON maps a Report to the check subcommand JSON shape (REQ-OUTPUT-1).
+func reportToCheckJSON(report overlap.Report) checkOnlyJSON {
+	return checkOnlyJSON{
 		Verdict:        verdictString(report.Verdict),
+		FileCollisions: buildFileCollisions(report),
+		ModuleOverlaps: buildModuleOverlaps(report),
+		Advisories:     advisoriesSlice(report),
+	}
+}
+
+// reportToScanJSON maps a Report to the scan subcommand JSON shape (REQ-OUTPUT-1).
+func reportToScanJSON(report overlap.Report) scanOnlyJSON {
+	return scanOnlyJSON{
+		Verdict:        verdictString(report.Verdict),
+		CollisionRate:  report.CollisionRate,
+		PairsEvaluated: pairsEvaluatedFromReport(report),
+		CollidingPairs: collidingPairsFromReport(report),
+		FileCollisions: buildFileCollisions(report),
+		ModuleOverlaps: buildModuleOverlaps(report),
+		Advisories:     advisoriesSlice(report),
+	}
+}
+
+// reportToMetricJSON maps a Report to the metric subcommand JSON shape (REQ-OUTPUT-1).
+func reportToMetricJSON(report overlap.Report, threshold float64) metricOnlyJSON {
+	return metricOnlyJSON{
 		CollisionRate:  report.CollisionRate,
 		Threshold:      threshold,
 		OverThreshold:  report.OverThreshold,
-		PairsEvaluated: pairsFromReport(report),
+		PairsEvaluated: pairsEvaluatedFromReport(report),
 		CollidingPairs: collidingPairsFromReport(report),
-		Advisories:     []string{},
 	}
-	for _, fc := range report.FileCollisions {
-		out.FileCollisions = append(out.FileCollisions, fileCollisionJSON{
-			File:   fc.File,
-			AgentA: fc.A.Agent,
-			AgentB: fc.B.Agent,
-		})
-	}
-	for _, mo := range report.ModuleOverlaps {
-		out.ModuleOverlaps = append(out.ModuleOverlaps, moduleOverlapJSON{
-			Module: mo.Module,
-			AgentA: mo.A.Agent,
-			AgentB: mo.B.Agent,
-		})
-	}
-	if out.FileCollisions == nil {
-		out.FileCollisions = []fileCollisionJSON{}
-	}
-	if out.ModuleOverlaps == nil {
-		out.ModuleOverlaps = []moduleOverlapJSON{}
-	}
-	return out
 }
 
-func pairsFromReport(r overlap.Report) int {
+func pairsEvaluatedFromReport(r overlap.Report) int {
 	seen := make(map[string]bool)
 	for _, fc := range r.FileCollisions {
 		key := pairKey(fc.A.Agent, fc.B.Agent)
@@ -229,7 +278,7 @@ func cmdCheck(args []string) error {
 	}
 
 	if *jsonOut {
-		return writeJSON(reportToJSON(report, cfg.Threshold))
+		return writeJSON(reportToCheckJSON(report))
 	}
 
 	fmt.Printf("verdict: %s\n", verdictString(report.Verdict))
@@ -267,7 +316,7 @@ func cmdScan(args []string) error {
 	}
 
 	if *jsonOut {
-		return writeJSON(reportToJSON(report, cfg.Threshold))
+		return writeJSON(reportToScanJSON(report))
 	}
 
 	fmt.Printf("verdict: %s\n", verdictString(report.Verdict))
@@ -308,7 +357,7 @@ func cmdMetric(args []string) error {
 	}
 
 	if *jsonOut {
-		return writeJSON(reportToJSON(report, *threshold))
+		return writeJSON(reportToMetricJSON(report, *threshold))
 	}
 
 	fmt.Printf("collision_rate: %.4f  threshold: %.4f  over: %v\n",

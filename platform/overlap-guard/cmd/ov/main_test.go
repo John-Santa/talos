@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/John-Santa/talos/platform/overlap-guard/domain/overlap"
@@ -76,4 +78,128 @@ func TestRun_ScanNoError(t *testing.T) {
 	err := run([]string{"scan", "--no-fetch", "--base", "develop"})
 	// err is expected here (no real wt/git); we just check no panic occurred.
 	_ = err
+}
+
+// W-03 RED: file_collisions[] must use agents[] not agent_a/agent_b (REQ-OUTPUT-1).
+func TestReportToCheckJSON_FileCollisions_AgentsArray(t *testing.T) {
+	t.Parallel()
+
+	atlas := overlap.NewClaim("atlas", "mod:core", "branch-a", []string{"shared.go"}, overlap.SourceActual)
+	hermes := overlap.NewClaim("hermes", "mod:core", "branch-b", []string{"shared.go"}, overlap.SourceActual)
+	report := overlap.NewReport([]overlap.Claim{atlas, hermes}, 0.15)
+
+	out := reportToCheckJSON(report)
+
+	if len(out.FileCollisions) == 0 {
+		t.Fatal("expected at least one file collision")
+	}
+	fc := out.FileCollisions[0]
+	if fc.File != "shared.go" {
+		t.Errorf("file_collisions[0].file = %q, want %q", fc.File, "shared.go")
+	}
+	if len(fc.Agents) != 2 {
+		t.Fatalf("file_collisions[0].agents length = %d, want 2", len(fc.Agents))
+	}
+	// agents[] must be sorted (atlas < hermes)
+	if fc.Agents[0] != "atlas" || fc.Agents[1] != "hermes" {
+		t.Errorf("file_collisions[0].agents = %v, want [atlas hermes]", fc.Agents)
+	}
+}
+
+// W-03 RED: module_overlaps[] must use agents[] not agent_a/agent_b (REQ-OUTPUT-1).
+func TestReportToCheckJSON_ModuleOverlaps_AgentsArray(t *testing.T) {
+	t.Parallel()
+
+	atlas := overlap.NewClaim("atlas", "mod:core", "branch-a", []string{"a.go"}, overlap.SourceActual)
+	hermes := overlap.NewClaim("hermes", "mod:core", "branch-b", []string{"b.go"}, overlap.SourceActual)
+	report := overlap.NewReport([]overlap.Claim{atlas, hermes}, 0.15)
+
+	out := reportToCheckJSON(report)
+
+	if len(out.ModuleOverlaps) == 0 {
+		t.Fatal("expected at least one module overlap")
+	}
+	mo := out.ModuleOverlaps[0]
+	if len(mo.Agents) != 2 {
+		t.Fatalf("module_overlaps[0].agents length = %d, want 2", len(mo.Agents))
+	}
+	if mo.Agents[0] != "atlas" || mo.Agents[1] != "hermes" {
+		t.Errorf("module_overlaps[0].agents = %v, want [atlas hermes]", mo.Agents)
+	}
+}
+
+// W-02 RED: check --json must NOT emit collision_rate, threshold, over_threshold, pairs_evaluated, colliding_pairs.
+func TestReportToCheckJSON_OmitsScanOnlyFields(t *testing.T) {
+	t.Parallel()
+
+	atlas := overlap.NewClaim("atlas", "mod:core", "branch-a", []string{"a.go"}, overlap.SourceActual)
+	report := overlap.NewReport([]overlap.Claim{atlas}, 0.15)
+
+	out := reportToCheckJSON(report)
+	// checkOnlyJSON must not have scan-only fields — verified via encoding
+	var buf strings.Builder
+	enc := json.NewEncoder(&buf)
+	if err := enc.Encode(out); err != nil {
+		t.Fatalf("encode error: %v", err)
+	}
+	encoded := buf.String()
+	for _, forbidden := range []string{"collision_rate", "threshold", "over_threshold", "pairs_evaluated", "colliding_pairs"} {
+		if strings.Contains(encoded, forbidden) {
+			t.Errorf("check JSON must not contain field %q but got: %s", forbidden, encoded)
+		}
+	}
+}
+
+// W-02 RED: metric --json must emit ONLY metric fields (no verdict, file_collisions, module_overlaps, advisories).
+func TestReportToMetricJSON_OnlyMetricFields(t *testing.T) {
+	t.Parallel()
+
+	atlas := overlap.NewClaim("atlas", "mod:core", "branch-a", []string{"a.go"}, overlap.SourceActual)
+	hermes := overlap.NewClaim("hermes", "mod:core", "branch-b", []string{"a.go"}, overlap.SourceActual)
+	report := overlap.NewReport([]overlap.Claim{atlas, hermes}, 0.15)
+
+	out := reportToMetricJSON(report, 0.15)
+	var buf strings.Builder
+	enc := json.NewEncoder(&buf)
+	if err := enc.Encode(out); err != nil {
+		t.Fatalf("encode error: %v", err)
+	}
+	encoded := buf.String()
+	for _, forbidden := range []string{"verdict", "file_collisions", "module_overlaps", "advisories"} {
+		if strings.Contains(encoded, forbidden) {
+			t.Errorf("metric JSON must not contain field %q but got: %s", forbidden, encoded)
+		}
+	}
+	for _, required := range []string{"collision_rate", "threshold", "over_threshold", "pairs_evaluated", "colliding_pairs"} {
+		if !strings.Contains(encoded, required) {
+			t.Errorf("metric JSON must contain field %q but got: %s", required, encoded)
+		}
+	}
+}
+
+// W-02 RED: cmdMetric unit test — composition root wiring.
+func TestCmdMetric_RequiresNoArgsForHelp(t *testing.T) {
+	t.Parallel()
+	// cmdMetric with --help returns a flag-parse error, not a panic; validates composition root is wired.
+	err := run([]string{"metric", "--threshold", "0.15", "--no-fetch"})
+	// Error is expected (no real wt/git available in unit tests); no panic is the guarantee.
+	_ = err
+}
+
+// W-01 RED: advisory emitted when issue has no checklist — visible in JSON output.
+func TestReportToCheckJSON_AdvisoriesFromReport(t *testing.T) {
+	t.Parallel()
+
+	// A report with an advisory (populated by service, tested at service layer).
+	// Here we verify that reportToCheckJSON passes report.Advisories through.
+	report := overlap.NewReport([]overlap.Claim{}, 0.15)
+	report.Advisories = []string{"TAL-99 sin checklist files: — solape a nivel-archivo no verificable"}
+
+	out := reportToCheckJSON(report)
+	if len(out.Advisories) != 1 {
+		t.Fatalf("advisories length = %d, want 1", len(out.Advisories))
+	}
+	if out.Advisories[0] != report.Advisories[0] {
+		t.Errorf("advisories[0] = %q, want %q", out.Advisories[0], report.Advisories[0])
+	}
 }
