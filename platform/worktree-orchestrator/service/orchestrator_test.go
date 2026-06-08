@@ -238,32 +238,131 @@ func TestCreate_WriteFileFailure(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// List
+// List — REQ-LIST-4: status taxonomy active/orphan/stale
 // ---------------------------------------------------------------------------
 
-func TestList(t *testing.T) {
+// TestList_Active verifies that a worktree whose branch still exists and whose
+// directory exists on disk is classified as "active".
+func TestList_Active(t *testing.T) {
 	t.Parallel()
+	// Use a real directory so the disk-existence check passes.
+	wtDir := t.TempDir()
 	runner := mock.NewGitRunnerMock()
 	runner.WorktreeListResult = "worktree /repo\n" +
 		"HEAD abc\n" +
 		"branch refs/heads/develop\n" +
 		"\n" +
-		"worktree talos.wt/agent-atlas\n" +
+		"worktree " + wtDir + "\n" +
 		"HEAD def\n" +
 		"branch refs/heads/agent/atlas/TAL-1\n" +
 		"\n"
+	// Branch exists → active (not orphan)
+	runner.BranchExistsResultsByBranch = map[string]bool{
+		"agent/atlas/TAL-1": true,
+	}
 	wf := &fakeWriteFile{}
 	o := newOrchestrator(runner, wf)
 
-	infos, err := o.List(context.Background())
+	statuses, err := o.List(context.Background())
 	if err != nil {
 		t.Fatalf("List() unexpected error: %v", err)
 	}
-	if len(infos) != 1 {
-		t.Fatalf("List() returned %d entries, want 1", len(infos))
+	if len(statuses) != 1 {
+		t.Fatalf("List() returned %d entries, want 1", len(statuses))
 	}
-	if infos[0].Branch != "agent/atlas/TAL-1" {
-		t.Errorf("infos[0].Branch = %q, want %q", infos[0].Branch, "agent/atlas/TAL-1")
+	if statuses[0].Info.Branch != "agent/atlas/TAL-1" {
+		t.Errorf("Info.Branch = %q, want %q", statuses[0].Info.Branch, "agent/atlas/TAL-1")
+	}
+	if statuses[0].Status != "active" {
+		t.Errorf("Status = %q, want %q", statuses[0].Status, "active")
+	}
+}
+
+// TestList_Orphan verifies that a worktree whose directory exists but whose
+// branch has been deleted (merged/pruned) is classified as "orphan".
+func TestList_Orphan(t *testing.T) {
+	t.Parallel()
+	// Use a real directory so the disk-existence check passes (not stale).
+	wtDir := t.TempDir()
+	runner := mock.NewGitRunnerMock()
+	runner.WorktreeListResult = "worktree /repo\n" +
+		"HEAD abc\n" +
+		"branch refs/heads/develop\n" +
+		"\n" +
+		"worktree " + wtDir + "\n" +
+		"HEAD def\n" +
+		"branch refs/heads/agent/atlas/TAL-1\n" +
+		"\n"
+	// Branch does NOT exist → orphan (merged/deleted)
+	runner.BranchExistsResultsByBranch = map[string]bool{
+		"agent/atlas/TAL-1": false,
+	}
+	wf := &fakeWriteFile{}
+	o := newOrchestrator(runner, wf)
+
+	statuses, err := o.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() unexpected error: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("List() returned %d entries, want 1", len(statuses))
+	}
+	if statuses[0].Status != "orphan" {
+		t.Errorf("Status = %q, want %q", statuses[0].Status, "orphan")
+	}
+}
+
+// TestList_Stale verifies that a worktree whose path does not exist on disk
+// is classified as "stale" (prunable) regardless of branch existence.
+func TestList_Stale(t *testing.T) {
+	t.Parallel()
+	runner := mock.NewGitRunnerMock()
+	// Use a path guaranteed not to exist on disk
+	runner.WorktreeListResult = "worktree /nonexistent-path-stale-9f3d\n" +
+		"HEAD abc\n" +
+		"branch refs/heads/agent/hermes/TAL-99\n" +
+		"\n"
+	// Branch may or may not exist for stale — disk check takes priority
+	runner.BranchExistsResultsByBranch = map[string]bool{
+		"agent/hermes/TAL-99": true,
+	}
+	wf := &fakeWriteFile{}
+	o := newOrchestrator(runner, wf)
+
+	statuses, err := o.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() unexpected error: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("List() returned %d entries, want 1", len(statuses))
+	}
+	if statuses[0].Status != "stale" {
+		t.Errorf("Status = %q, want %q", statuses[0].Status, "stale")
+	}
+}
+
+// TestList_NoDetachedStatus verifies that "detached" is NOT a valid output
+// status — detached HEAD worktrees are either orphan (no branch ref) or
+// active (path exists), never a separate "detached" status value.
+func TestList_NoDetachedStatus(t *testing.T) {
+	t.Parallel()
+	runner := mock.NewGitRunnerMock()
+	runner.WorktreeListResult = "worktree talos.wt/agent-hermes\n" +
+		"HEAD abc\n" +
+		"detached\n" +
+		"\n"
+	runner.BranchExistsResultsByBranch = map[string]bool{}
+	wf := &fakeWriteFile{}
+	o := newOrchestrator(runner, wf)
+
+	statuses, err := o.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() unexpected error: %v", err)
+	}
+	for _, s := range statuses {
+		if s.Status == "detached" {
+			t.Errorf("Status = %q: 'detached' is not a valid list status (use orphan or active)", s.Status)
+		}
 	}
 }
 
@@ -436,5 +535,80 @@ func TestEnv_HappyPath(t *testing.T) {
 	// No JIRA_ in content (Decision 5 guard, belt+suspenders)
 	if strings.Contains(string(wf.data), "JIRA_") {
 		t.Errorf("env content contains JIRA_ — Decision 5 violation: %s", string(wf.data))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Teardown — W-4: ErrDirtyWorktree must carry the figura (REQ-TEARDOWN-2,3)
+// ---------------------------------------------------------------------------
+
+// TestTeardown_Dirty_HasFigura verifies that when the adapter refuses to
+// remove a dirty worktree, the service wraps the error into ErrDirtyWorktree
+// with the correct figura (not empty string).
+func TestTeardown_Dirty_HasFigura(t *testing.T) {
+	t.Parallel()
+	runner := mock.NewGitRunnerMock()
+	runner.WorktreeListResult = "worktree /repo\n" +
+		"HEAD abc\n" +
+		"branch refs/heads/develop\n" +
+		"\n" +
+		"worktree talos.wt/agent-hermes\n" +
+		"HEAD def\n" +
+		"branch refs/heads/agent/hermes/TAL-2\n" +
+		"\n"
+	// Adapter returns sentinel "dirty" error — no figura in it
+	runner.WorktreeRemoveErr = mock.ErrDirtyWorktreeSentinel("talos.wt/agent-hermes")
+	wf := &fakeWriteFile{}
+	o := newOrchestrator(runner, wf)
+
+	err := o.Teardown(context.Background(), "hermes", "TAL-2", false, false)
+	if err == nil {
+		t.Fatal("expected error from dirty worktree, got nil")
+	}
+
+	var dirty *worktree.ErrDirtyWorktree
+	if !errors.As(err, &dirty) {
+		t.Fatalf("error type = %T, want *ErrDirtyWorktree; err = %v", err, err)
+	}
+	// The service MUST enrich the error with the figura
+	if dirty.Figura != "hermes" {
+		t.Errorf("ErrDirtyWorktree.Figura = %q, want %q", dirty.Figura, "hermes")
+	}
+	// Path must also be set
+	if dirty.Path == "" {
+		t.Errorf("ErrDirtyWorktree.Path is empty, want non-empty")
+	}
+}
+
+// TestTeardown_Dirty_FileCount verifies that when file-count is available,
+// ErrDirtyWorktree.FileCount is > 0. This test uses a mock that sets
+// WorktreeRemoveFileCount to simulate the adapter reporting a count.
+func TestTeardown_Dirty_FileCount(t *testing.T) {
+	t.Parallel()
+	runner := mock.NewGitRunnerMock()
+	runner.WorktreeListResult = "worktree /repo\n" +
+		"HEAD abc\n" +
+		"branch refs/heads/develop\n" +
+		"\n" +
+		"worktree talos.wt/agent-hermes\n" +
+		"HEAD def\n" +
+		"branch refs/heads/agent/hermes/TAL-2\n" +
+		"\n"
+	// Adapter returns sentinel with a file count of 3
+	runner.WorktreeRemoveErr = mock.ErrDirtyWorktreeSentinelWithCount("talos.wt/agent-hermes", 3)
+	wf := &fakeWriteFile{}
+	o := newOrchestrator(runner, wf)
+
+	err := o.Teardown(context.Background(), "hermes", "TAL-2", false, false)
+	if err == nil {
+		t.Fatal("expected error from dirty worktree, got nil")
+	}
+
+	var dirty *worktree.ErrDirtyWorktree
+	if !errors.As(err, &dirty) {
+		t.Fatalf("error type = %T, want *ErrDirtyWorktree; err = %v", err, err)
+	}
+	if dirty.FileCount != 3 {
+		t.Errorf("ErrDirtyWorktree.FileCount = %d, want 3", dirty.FileCount)
 	}
 }

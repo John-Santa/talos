@@ -52,12 +52,32 @@ func (e *ErrWorktreeNotFound) Error() string {
 }
 
 // ErrDirtyWorktree is returned when a worktree has uncommitted changes and --force
-// was not supplied.
+// was not supplied. Figura is always set by the service (never the adapter).
+// FileCount is the number of dirty files reported by git status --porcelain;
+// zero means the count was not available (best-effort, REQ-TEARDOWN-2,3).
 type ErrDirtyWorktree struct {
-	Figura string
-	Path   string
+	Figura    string
+	Path      string
+	FileCount int
 }
 
 func (e *ErrDirtyWorktree) Error() string {
+	if e.FileCount > 0 {
+		return fmt.Sprintf("worktree for figura %q at %q has %d uncommitted file(s); use --force to override",
+			e.Figura, e.Path, e.FileCount)
+	}
 	return fmt.Sprintf("worktree for figura %q at %q has uncommitted changes; use --force to override", e.Figura, e.Path)
+}
+
+// ErrDirtyWorktreeSentinel is the adapter-level sentinel returned by
+// WorktreeRemove when git refuses to remove a dirty worktree. It carries
+// the path and optional file count but NOT the figura — the service is
+// responsible for wrapping this into ErrDirtyWorktree with the correct figura.
+type ErrDirtyWorktreeSentinel struct {
+	Path      string
+	FileCount int // 0 = count not available
+}
+
+func (e *ErrDirtyWorktreeSentinel) Error() string {
+	return fmt.Sprintf("worktree at %q is dirty (%d dirty file(s))", e.Path, e.FileCount)
 }
