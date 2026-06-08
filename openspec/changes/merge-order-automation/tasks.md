@@ -37,11 +37,11 @@
 
 ## Phase 0: Repo-level scaffolding (sequential, no RED/GREEN — no logic)
 
-- [ ] **0.1** Add `/platform/merge-order-orchestrator/mo` to `.gitignore` after the `/platform/worktree-orchestrator/wt` line. No test needed — verified by `git status`. **REQ-CLEANUP-3, design §10**
+- [x] **0.1** Add `/platform/merge-order-orchestrator/mo` to `.gitignore` after the `/platform/worktree-orchestrator/wt` line. No test needed — verified by `git status`. **REQ-CLEANUP-3, design §10**
 
-- [ ] **0.2** Fix `team-context/merge-order.md`: replace ALL occurrences of `main` as the integration branch with `develop`. Two lines require editing — line 3 (header: `contra \`main\``) and line 7 (bullet: `contra \`main\`, **o** rebase-sobre-\`main\``). Zero occurrences of `main` as a merge target MUST remain after this edit. **REQ-CLEANUP-1, design §10**
+- [x] **0.2** Fix `team-context/merge-order.md`: replace ALL occurrences of `main` as the integration branch with `develop`. Two lines require editing — line 3 (header: `contra \`main\``) and line 7 (bullet: `contra \`main\`, **o** rebase-sobre-\`main\``). Zero occurrences of `main` as a merge target MUST remain after this edit. **REQ-CLEANUP-1, design §10**
 
-- [ ] **0.3** Update `team-context/ownership.md`: add row `platform/merge-order-orchestrator/**` → HERMES, module:devops, note `CLI \`mo\`, dominio, servicio, adapters gitcli/wtcli` to the shared-file map, mirroring the existing `platform/worktree-orchestrator/**` pattern (line 40). **REQ-CLEANUP-2, design §10**
+- [x] **0.3** Update `team-context/ownership.md`: add row `platform/merge-order-orchestrator/**` → HERMES, module:devops, note `CLI \`mo\`, dominio, servicio, adapters gitcli/wtcli` to the shared-file map, mirroring the existing `platform/worktree-orchestrator/**` pattern (line 40). **REQ-CLEANUP-2, design §10**
 
 ---
 
@@ -159,7 +159,7 @@
 
 ### 5.1 — `adapter/gitcli` Inspector (RED → GREEN)
 
-- [ ] **5.1a [RED]** Write `adapter/gitcli/inspector_test.go` with `testing.Short()` guard at top of each test (`if testing.Short() { t.Skip("integration: real git") }`). Setup: `t.TempDir()` → `git init` → seed `develop` branch with an initial commit → create an agent branch `agent/test/TAL-X` with 2 commits, and a separate `agent/conflict/TAL-Y` branch that edits the same file. Cases:
+- [x] **5.1a [RED]** Write `adapter/gitcli/inspector_test.go` with `testing.Short()` guard at top of each test (`if testing.Short() { t.Skip("integration: real git") }`). Setup: `t.TempDir()` → `git init` → seed `develop` branch with an initial commit → create an agent branch `agent/test/TAL-X` with 2 commits, and a separate `agent/conflict/TAL-Y` branch that edits the same file. Cases:
   - `Fetch` invokes without error on a valid repo.
   - `RevParse("develop")` returns a non-empty SHA.
   - `MergeBase(develop, agentBranch)` returns correct ancestor.
@@ -170,31 +170,31 @@
   - `MergeTreeConflicts(developTip, conflictBranch)` conflicting branch → exit 1 → `(paths, false, nil)` with correct paths.
   All tests must fail. **REQ-COLLISION-1, REQ-TEST-5, ADR-M3, design §8.1**
 
-- [ ] **5.1b [GREEN]** Write `adapter/gitcli/inspector.go`: `Inspector` struct implementing `port.GitInspector`. `NewInspector(repoRoot string) *Inspector`. Each method builds its own argv (operation-shaped, not generic `Run`), sets `cmd.Dir = repoRoot`, maps exit codes as per design §8.1. `MergeTreeConflicts` maps exit 0 → clean, exit 1 → parse stdout lines → conflicting, other → error. `CommitsAhead` runs `git rev-list --count <base>..<branch>`. `ChangedFiles` runs `git diff --name-only <base>...<branch>` (three-dot). `CreatedAt` via `git log -1 --format=%cI <branch>` returned as `time.Time` (NOTE: this method is NOT on the `GitInspector` interface — it's a package-internal helper called by the adapter during candidate building, exposed as a helper that service tests do not need to mock). Compile assertion: `var _ port.GitInspector = (*Inspector)(nil)`. All 5.1a tests must pass. **REQ-COLLISION-1, ADR-M3, design §8.1**
+- [x] **5.1b [GREEN]** Write `adapter/gitcli/inspector.go`: `Inspector` struct implementing `port.GitInspector`. `NewInspector(repoRoot string) *Inspector`. Each method builds its own argv (operation-shaped, not generic `Run`), sets `cmd.Dir = repoRoot`, maps exit codes as per design §8.1. `MergeTreeConflicts` maps exit 0 → clean, exit 1 → parse stdout lines → conflicting, other → error. `CommitsAhead` runs `git rev-list --count <base>..<branch>`. `ChangedFiles` runs `git diff --name-only <base>...<branch>` (three-dot). `CreatedAt` via `git log -1 --format=%cI <branch>` returned as `time.Time` (NOTE: this method is NOT on the `GitInspector` interface — it's a package-internal helper called by the adapter during candidate building, exposed as a helper that service tests do not need to mock). Compile assertion: `var _ port.GitInspector = (*Inspector)(nil)`. All 5.1a tests must pass. **REQ-COLLISION-1, ADR-M3, design §8.1**
 
 ### 5.2 — `adapter/gitcli` Integrator (RED → GREEN)
 
-- [ ] **5.2a [RED]** Write `adapter/gitcli/integrator_test.go` with `testing.Short()` guard. Setup: same real git repo structure as 5.1a, plus a clean rebase target and a conflicting one. Cases:
+- [x] **5.2a [RED]** Write `adapter/gitcli/integrator_test.go` with `testing.Short()` guard. Setup: same real git repo structure as 5.1a, plus a clean rebase target and a conflicting one. Cases:
   - `RebaseOnto(agentBranch, "develop")` clean branch → `(nil, nil)`.
   - `RebaseOnto(conflictBranch, "develop")` conflicting branch → returns non-empty `conflicts` slice with the conflicting paths (unmerged files from `git diff --name-only --diff-filter=U`), and a non-nil error.
   All tests must fail. **REQ-EXECUTE-5, REQ-EXECUTE-8, design §8.1**
 
-- [ ] **5.2b [GREEN]** Write `adapter/gitcli/integrator.go`: `Integrator` struct implementing `port.GitIntegrator`. `NewIntegrator(repoRoot string) *Integrator`. `RebaseOnto` runs `git rebase <base> <branch>` with `cmd.Dir = worktreePath` (NOTE: `worktreePath` is passed through `RebaseOnto`'s context or as a field — design §6.2 step 3d says "rebase in the worktree directory"; reconcile by adding `WorktreePath` to `ExecuteOptions` and passing it when calling `RebaseOnto`, or adjusting the `Integrator` to accept `worktreePath` alongside `branch` in the call — choose the cleanest option consistent with zero extra port methods). On conflict (non-zero exit + "CONFLICT" in stderr), runs `git diff --name-only --diff-filter=U` for unmerged paths, runs `git rebase --abort`, returns `(conflicts, ErrRebaseConflict{...})`. Compile assertion: `var _ port.GitIntegrator = (*Integrator)(nil)`. All 5.2a tests must pass. **REQ-EXECUTE-5, REQ-EXECUTE-8, ADR-M1, design §8.1**
+- [x] **5.2b [GREEN]** Write `adapter/gitcli/integrator.go`: `Integrator` struct implementing `port.GitIntegrator`. `NewIntegrator(repoRoot string) *Integrator`. `RebaseOnto` runs `git rebase <base> <branch>` with `cmd.Dir = worktreePath` (NOTE: `worktreePath` is passed through `RebaseOnto`'s context or as a field — design §6.2 step 3d says "rebase in the worktree directory"; reconcile by adding `WorktreePath` to `ExecuteOptions` and passing it when calling `RebaseOnto`, or adjusting the `Integrator` to accept `worktreePath` alongside `branch` in the call — choose the cleanest option consistent with zero extra port methods). On conflict (non-zero exit + "CONFLICT" in stderr), runs `git diff --name-only --diff-filter=U` for unmerged paths, runs `git rebase --abort`, returns `(conflicts, ErrRebaseConflict{...})`. Compile assertion: `var _ port.GitIntegrator = (*Integrator)(nil)`. All 5.2a tests must pass. **REQ-EXECUTE-5, REQ-EXECUTE-8, ADR-M1, design §8.1**
 
 ### 5.3 — `adapter/wtcli` Lister (RED → GREEN)
 
-- [ ] **5.3a [RED]** Write `adapter/wtcli/lister_test.go` with two test sections:
+- [x] **5.3a [RED]** Write `adapter/wtcli/lister_test.go` with two test sections:
   - **Unit (no `wt`, runs under `-short`):** golden JSON fixture decode — embed the exact indented JSON array that `wt list --json` produces (verified against `cmd/wt/main.go`'s `renderListJSON`); decode into `[]port.WorktreeEntry`; assert every field maps correctly (seam-contract test). Does NOT have `t.Skip` guard — it MUST run under `-short` as a pure unit test.
   - **Integration (real `wt`):** guarded with `if testing.Short() { t.Skip("integration: real wt") }`. Invokes `wt list --json` on PATH; validates non-error decode. Skipped in `-short`.
   All tests must fail. **REQ-READINESS-1, REQ-TEST-5, ADR-M2, design §8.2**
 
-- [ ] **5.3b [GREEN]** Write `adapter/wtcli/lister.go`: `Lister` struct implementing `port.WorktreeLister`. `NewLister(repoRoot, wtBinary string) *Lister`. `List` runs `<wtBinary> list --json` with `cmd.Dir = repoRoot`; on `exec.ErrNotFound` or path-not-found error wraps as `ErrWtBinaryNotFound{Binary: wtBinary}`; on successful run decodes stdout into `[]port.WorktreeEntry`; on JSON decode failure wraps as `ErrWtOutputMalformed{Fragment: truncated, Cause: err}`. Compile assertion: `var _ port.WorktreeLister = (*Lister)(nil)`. All 5.3a tests must pass. **REQ-READINESS-1, REQ-READINESS-5..6, ADR-M2, design §8.2**
+- [x] **5.3b [GREEN]** Write `adapter/wtcli/lister.go`: `Lister` struct implementing `port.WorktreeLister`. `NewLister(repoRoot, wtBinary string) *Lister`. `List` runs `<wtBinary> list --json` with `cmd.Dir = repoRoot`; on `exec.ErrNotFound` or path-not-found error wraps as `ErrWtBinaryNotFound{Binary: wtBinary}`; on successful run decodes stdout into `[]port.WorktreeEntry`; on JSON decode failure wraps as `ErrWtOutputMalformed{Fragment: truncated, Cause: err}`. Compile assertion: `var _ port.WorktreeLister = (*Lister)(nil)`. All 5.3a tests must pass. **REQ-READINESS-1, REQ-READINESS-5..6, ADR-M2, design §8.2**
 
 ---
 
 ## Phase 6: CLI composition root (sequential — depends on all prior phases)
 
-- [ ] **6.1** Write `cmd/mo/main.go` and `cmd/mo/main_test.go` (composition root). Implementation:
+- [x] **6.1** Write `cmd/mo/main.go` and `cmd/mo/main_test.go` (composition root). Implementation:
   - `main() → run(os.Args[1:]) → os.Exit(exitCodeFor(err))` pattern (mirrors `cmd/wt/main.go`).
   - `run(args []string) error` subcommand switch: `plan`, `execute`, `check`; default → usage error.
   - `cmdPlan(args)`: flags `--json`, `--base` (default "develop"), `--wt-bin` (default "wt"), `--depends` (repeatable, `A:B` format), `--depends-file <f>`, `--no-fetch`. Builds deps map. Resolves `repoRoot` via `git rev-parse --show-toplevel` (or `os.Getwd` fallback). Wires `gitcli.NewInspector(root)`, `wtcli.NewLister(root, cfg.WtBinary)`, `NewPlanner(inspector, lister, cfg)`. Calls `Plan(ctx, deps)`. Renders tabular output (numbered steps, AHEAD, PREDICTED, CONFLICTS columns, health metric footer) or `--json` shape from design §7. Prints "nothing to merge" message on `ErrNoCandidates` + exit 0.
