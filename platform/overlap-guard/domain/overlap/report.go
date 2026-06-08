@@ -12,11 +12,12 @@ const (
 	VerdictBlock
 )
 
-// Report is the full overlap evaluation: verdict, the two collision kinds, and the HG6 collision rate.
+// Report is the full overlap evaluation: verdict, the two collision kinds, the HG6 collision rate, and observability advisories.
 type Report struct {
 	Verdict        Verdict
 	FileCollisions []FileCollision
 	ModuleOverlaps []ModuleOverlap
+	Advisories     []string
 	ClaimCount     int
 	CollisionRate  float64
 	OverThreshold  bool
