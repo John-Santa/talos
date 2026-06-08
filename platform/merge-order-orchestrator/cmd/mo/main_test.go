@@ -1,6 +1,8 @@
 package main
 
 import (
+	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -119,6 +121,72 @@ func TestParseDependsFile(t *testing.T) {
 	}
 	if len(deps["B"]) != 1 || deps["B"][0] != "C" {
 		t.Errorf("deps[B] = %v, want [C]", deps["B"])
+	}
+}
+
+func TestRenderPlanJSON_ContainsThreshold(t *testing.T) {
+	t.Parallel()
+	// RED: planJSON must contain "threshold" field with value 0.15 (REQ-PLAN-3).
+	// Capture stdout by redirecting os.Stdout.
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	report := mergeorder.PlanReport{
+		Plan: mergeorder.MergePlan{
+			BaseBranch: "develop",
+			BaseTip:    "abc123",
+		},
+		ConflictRate:    0.0,
+		SegmentationBad: false,
+	}
+	// renderPlanJSON uses cfg.MaxConflictRate which is threaded via planJSON.Threshold.
+	// We call renderPlanJSONWithThreshold (the new signature) directly.
+	err := renderPlanJSONWithThreshold(report, 0.15)
+
+	w.Close()
+	os.Stdout = old
+
+	var buf strings.Builder
+	io.Copy(&buf, r)
+
+	if err != nil {
+		t.Fatalf("renderPlanJSONWithThreshold: %v", err)
+	}
+	if !strings.Contains(buf.String(), `"threshold": 0.15`) {
+		t.Errorf("JSON output missing threshold field; got:\n%s", buf.String())
+	}
+}
+
+// TestPrintConflictRecipe_ContainsRequiredSteps proves the §11 mid-task-failure recipe
+// printed to stderr contains all three required steps including wt teardown --force.
+// RED: will fail until printConflictRecipe exists in main.go.
+func TestPrintConflictRecipe_ContainsRequiredSteps(t *testing.T) {
+	t.Parallel()
+	old := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	printConflictRecipe(w, "feat/atlas/TAL-1", "agent-atlas", []string{"platform/foo.go", "platform/bar.go"})
+
+	w.Close()
+	os.Stderr = old
+
+	var buf strings.Builder
+	io.Copy(&buf, r)
+	got := buf.String()
+
+	checks := []string{
+		"To Do",
+		"comment",
+		"wt teardown --force agent-atlas",
+		"feat/atlas/TAL-1",
+		"platform/foo.go",
+	}
+	for _, want := range checks {
+		if !strings.Contains(got, want) {
+			t.Errorf("recipe missing %q; full output:\n%s", want, got)
+		}
 	}
 }
 

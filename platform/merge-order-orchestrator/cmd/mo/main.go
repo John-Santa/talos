@@ -14,6 +14,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -135,6 +136,7 @@ type planJSON struct {
 	BaseBranch      string         `json:"base_branch"`
 	BaseTip         string         `json:"base_tip"`
 	ConflictRate    float64        `json:"conflict_rate"`
+	Threshold       float64        `json:"threshold"`
 	SegmentationBad bool           `json:"segmentation_bad"`
 	Steps           []planStepJSON `json:"steps"`
 }
@@ -185,16 +187,17 @@ func cmdPlan(args []string) error {
 	}
 
 	if *jsonOut {
-		return renderPlanJSON(report)
+		return renderPlanJSONWithThreshold(report, cfg.MaxConflictRate)
 	}
 	return renderPlanTabular(report)
 }
 
-func renderPlanJSON(report mergeorder.PlanReport) error {
+func renderPlanJSONWithThreshold(report mergeorder.PlanReport, threshold float64) error {
 	out := planJSON{
 		BaseBranch:      report.Plan.BaseBranch,
 		BaseTip:         report.Plan.BaseTip,
 		ConflictRate:    report.ConflictRate,
+		Threshold:       threshold,
 		SegmentationBad: report.SegmentationBad,
 	}
 	for _, step := range report.Plan.Steps {
@@ -239,6 +242,18 @@ func renderPlanTabular(report mergeorder.PlanReport) error {
 	return w.Flush()
 }
 
+// printConflictRecipe writes the §11 mid-task-failure three-step recipe to w.
+func printConflictRecipe(w io.Writer, branch, figura string, conflictFiles []string) {
+	fmt.Fprintf(w, "\nMerge halted — conflict detected on branch %q\n", branch)
+	if len(conflictFiles) > 0 {
+		fmt.Fprintf(w, "Conflicting files: %s\n", strings.Join(conflictFiles, ", "))
+	}
+	fmt.Fprintln(w, "\n§11 mid-task-failure recipe:")
+	fmt.Fprintln(w, "  1. Transition the Jira issue back to To Do")
+	fmt.Fprintln(w, "  2. Add a comment on the issue with the conflict details above")
+	fmt.Fprintf(w, "  3. Discard the worktree: wt teardown --force %s\n", figura)
+}
+
 func cmdExecute(args []string) error {
 	fs := flag.NewFlagSet("execute", flag.ContinueOnError)
 	base := fs.String("base", "develop", "Integration base branch")
@@ -274,11 +289,32 @@ func cmdExecute(args []string) error {
 	runner := service.NewIntegrationRunner(inspector, integrator, lister, cfg)
 
 	ctx := context.Background()
-	return runner.Execute(ctx, service.ExecuteOptions{
+	err = runner.Execute(ctx, service.ExecuteOptions{
 		Deps:      deps,
 		NoFetch:   *noFetch,
 		Confirmed: true,
 	})
+	if err != nil {
+		var mc *mergeorder.ErrMergeConflict
+		var rc *mergeorder.ErrRebaseConflict
+		switch {
+		case errors.As(err, &mc):
+			printConflictRecipe(os.Stderr, mc.Branch, figuraFromBranch(mc.Branch), mc.Files)
+		case errors.As(err, &rc):
+			printConflictRecipe(os.Stderr, rc.Branch, figuraFromBranch(rc.Branch), rc.Files)
+		}
+	}
+	return err
+}
+
+// figuraFromBranch extracts the figura segment from an agent branch name.
+// For "agent/<figura>/TAL-N" it returns "<figura>"; for other shapes it returns the branch as-is.
+func figuraFromBranch(branch string) string {
+	parts := strings.SplitN(branch, "/", 3)
+	if len(parts) == 3 && parts[0] == "agent" {
+		return parts[1]
+	}
+	return branch
 }
 
 func cmdCheck(args []string) error {
