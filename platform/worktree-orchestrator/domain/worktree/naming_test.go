@@ -7,10 +7,6 @@ import (
 	"github.com/John-Santa/talos/platform/worktree-orchestrator/domain/worktree"
 )
 
-// ---------------------------------------------------------------------------
-// ParseFigura
-// ---------------------------------------------------------------------------
-
 func TestParseFigura(t *testing.T) {
 	t.Parallel()
 	validFiguras := []string{
@@ -47,10 +43,6 @@ func TestParseFigura(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// ValidateJiraKey
-// ---------------------------------------------------------------------------
-
 func TestValidateJiraKey(t *testing.T) {
 	t.Parallel()
 	validKeys := []string{"TAL-1", "TAL-42", "TAL-100", "TAL-9999"}
@@ -80,10 +72,6 @@ func TestValidateJiraKey(t *testing.T) {
 		})
 	}
 }
-
-// ---------------------------------------------------------------------------
-// BranchName / WorktreePath
-// ---------------------------------------------------------------------------
 
 func TestBranchName(t *testing.T) {
 	t.Parallel()
@@ -130,10 +118,6 @@ func TestWorktreePath(t *testing.T) {
 		})
 	}
 }
-
-// ---------------------------------------------------------------------------
-// NewWorktreeSpec
-// ---------------------------------------------------------------------------
 
 func TestNewWorktreeSpec(t *testing.T) {
 	t.Parallel()
