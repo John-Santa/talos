@@ -36,3 +36,4 @@ talos.wt/
 /platform/worktree-orchestrator/wt
 /platform/merge-order-orchestrator/mo
 /platform/overlap-guard/ov
+/platform/ci-checks/ch
