@@ -31,7 +31,7 @@ func ParseFigura(s string) (Figura, error) {
 func ValidateJiraKey(key, projectKey string) error {
 	re := regexp.MustCompile("^" + regexp.QuoteMeta(projectKey) + "-[1-9][0-9]*$")
 	if !re.MatchString(key) {
-		return &ErrInvalidKey{Key: key}
+		return &ErrInvalidKey{Key: key, ProjectKey: projectKey}
 	}
 	return nil
 }

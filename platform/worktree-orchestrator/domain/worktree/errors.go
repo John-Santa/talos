@@ -12,13 +12,14 @@ func (e *ErrInvalidFigure) Error() string {
 	return fmt.Sprintf("invalid figura %q: not in CONSTITUTION §1 roster", e.Figura)
 }
 
-// ErrInvalidKey is returned when a Jira key does not match the TAL-<n> pattern.
+// ErrInvalidKey is returned when a Jira key does not match the <projectKey>-<n> pattern.
 type ErrInvalidKey struct {
-	Key string
+	Key        string
+	ProjectKey string
 }
 
 func (e *ErrInvalidKey) Error() string {
-	return fmt.Sprintf("invalid jira key %q: must match TAL-<n> (n >= 1)", e.Key)
+	return fmt.Sprintf("invalid jira key %q: must match %s-<n> (n >= 1)", e.Key, e.ProjectKey)
 }
 
 // ErrWorktreeExists is returned when a worktree for the given figura already exists.

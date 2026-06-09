@@ -72,6 +72,12 @@ func TestParseAgentBranch(t *testing.T) {
 			projectKey: "TAL",
 			wantErr:    true,
 		},
+		{
+			name:       "TAL branch rejected under FOO projectKey",
+			branch:     "agent/hermes/TAL-7",
+			projectKey: "FOO",
+			wantErr:    true,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -2,6 +2,7 @@ package worktree_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/John-Santa/talos/platform/worktree-orchestrator/domain/worktree"
@@ -95,6 +96,9 @@ func TestValidateJiraKey(t *testing.T) {
 			var e *worktree.ErrInvalidKey
 			if !errors.As(err, &e) {
 				t.Errorf("error type = %T, want *ErrInvalidKey", err)
+			}
+			if msg := err.Error(); !strings.Contains(msg, "FOO-<n>") || strings.Contains(msg, "TAL-<n>") {
+				t.Errorf("ValidateJiraKey(TAL-1, FOO) message = %q, want expected pattern FOO-<n>, not TAL-<n>", msg)
 			}
 		})
 	})
