@@ -61,7 +61,8 @@ jobs:
             fi
           done
       - name: Vitest placeholder (frontend — TODO Fase 5+)
-        run: echo "vitest: no frontend changes detected or not yet wired"
+        run: |
+          echo "vitest: no frontend changes detected or not yet wired"
       - name: Assert verify-report present
         run: |
           if ! ls openspec/changes/**/verify-report.md 2>/dev/null; then
