@@ -17,10 +17,14 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/John-Santa/talos/platform/jira-evidence-loop/adapter/rest"
 	"github.com/John-Santa/talos/platform/jira-evidence-loop/domain/evidence"
+	"github.com/John-Santa/talos/platform/jira-evidence-loop/internal/envfile"
 	"github.com/John-Santa/talos/platform/jira-evidence-loop/service"
 )
 
@@ -33,6 +37,18 @@ func main() {
 
 // run is the testable entry point. It returns a non-nil error on any failure.
 func run(args []string) error {
+	// R8 / ADR-J3: load env files BEFORE any os.Getenv call or flag default
+	// evaluation. Real environment wins (if-unset semantics); CI is unaffected.
+	root := repoRoot()
+	paths := []string{
+		filepath.Join(root, ".talos", "project.env"),
+		filepath.Join(root, ".env"),
+	}
+	if mainRoot := mainWorktreeRoot(); mainRoot != "" && mainRoot != root {
+		paths = append(paths, filepath.Join(mainRoot, ".env"))
+	}
+	_ = envfile.LoadInto(os.Setenv, os.Getenv, paths...)
+
 	if len(args) == 0 {
 		return fmt.Errorf("subcommand required: run-loop")
 	}
@@ -42,6 +58,39 @@ func run(args []string) error {
 	default:
 		return fmt.Errorf("unknown subcommand %q; available: run-loop", args[0])
 	}
+}
+
+// repoRoot returns the repository root via git, falling back to the working
+// directory on error.
+func repoRoot() string {
+	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	if err == nil {
+		return strings.TrimSpace(string(out))
+	}
+	wd, _ := os.Getwd()
+	return wd
+}
+
+// mainWorktreeRoot returns the main worktree checkout root when running inside
+// a linked worktree, enabling .env fallback from the primary checkout. Returns
+// "" on any error (best-effort).
+func mainWorktreeRoot() string {
+	out, err := exec.Command("git", "rev-parse", "--git-common-dir").Output()
+	if err != nil {
+		return ""
+	}
+	commonDir := strings.TrimSpace(string(out))
+	if commonDir == "" {
+		return ""
+	}
+	if !filepath.IsAbs(commonDir) {
+		wd, err := os.Getwd()
+		if err != nil {
+			return ""
+		}
+		commonDir = filepath.Join(wd, commonDir)
+	}
+	return filepath.Dir(commonDir)
 }
 
 // ---------------------------------------------------------------------------
@@ -86,7 +135,8 @@ func cmdRunLoop(args []string) error {
 		}
 	}
 
-	// Credentials from env only (REQ-AUTH).
+	// Credentials from env only (REQ-AUTH). Non-secret identity (site, project
+	// key, project ID) may come from .talos/project.env (loaded above).
 	email := os.Getenv("JIRA_EMAIL")
 	token := os.Getenv("JIRA_API_TOKEN")
 	if email == "" {
@@ -109,6 +159,15 @@ func cmdRunLoop(args []string) error {
 	cfg := service.DefaultTALConfig()
 	cfg.SiteURL = site
 	cfg.Credentials = service.Credentials{Email: email, APIToken: token}
+
+	// Override non-secret project identity from env (populated by
+	// .talos/project.env or inherited environment; REQ-IDENT).
+	if v := os.Getenv("JIRA_PROJECT_KEY"); v != "" {
+		cfg.ProjectKey = v
+	}
+	if v := os.Getenv("JIRA_PROJECT_ID"); v != "" {
+		cfg.ProjectID = v
+	}
 
 	validatedCfg, err := service.NewConfig(cfg)
 	if err != nil {

@@ -43,6 +43,9 @@ conventions:
   mcp_routing: .mcp/routing.md
 
 # --- Jira ---
+# Runtime mirror: .talos/project.env contains JIRA_SITE_URL / JIRA_PROJECT_KEY /
+# JIRA_PROJECT_ID as committed non-secrets for the Go CLIs (REQ-AUTH-1, ADR-J9).
+# Keep in sync with this block when values change.
 jira:
   site: tablex.atlassian.net
   project_key: TAL              # creado en gate HG1 (id 10099, team-managed)
