@@ -344,6 +344,9 @@ func cmdScan(args []string) error {
 	cfg.BaseBranch = *base
 	cfg.WtBinary = *wtBin
 	cfg.NoFetch = *noFetch
+	if v := os.Getenv("JIRA_PROJECT_KEY"); v != "" {
+		cfg.Project = v
+	}
 
 	inspector := gitcli.NewInspector(root)
 	lister := wtcli.NewLister(*wtBin)
@@ -385,6 +388,9 @@ func cmdMetric(args []string) error {
 	cfg.WtBinary = *wtBin
 	cfg.NoFetch = *noFetch
 	cfg.Threshold = *threshold
+	if v := os.Getenv("JIRA_PROJECT_KEY"); v != "" {
+		cfg.Project = v
+	}
 
 	inspector := gitcli.NewInspector(root)
 	lister := wtcli.NewLister(*wtBin)
