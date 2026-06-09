@@ -32,7 +32,9 @@ loop de evidencia de Jira (ver `platform/`).
 
 - **Backend: Go** (`go test ./...`, strict TDD; skill `go-testing` disponible).
   Devs backend: ATLAS · HEPHAESTUS · CRONOS. También GAIA (datos: Go + SQL/migraciones).
-- **Frontend: React + Vite** (TypeScript; testing con vitest). Dev: IRIS.
+- **Frontend (IRIS): consola primero.** La capa visible arranca como **TUI Go + Bubbletea**
+  (módulo `platform/console`, binario `talos`; `go test ./...`, strict TDD, skill `go-testing`).
+  **React + Vite** (TS, vitest) queda para una eventual promoción a web — todavía no se construye.
 
 > Nota de diseño para Fase 1: con backend Go, el helper `jira-evidence-loop` puede ser un módulo/CLI
 > Go contra el **REST de Jira** (token propio) — eso habilita adjuntos sin depender del MCP community.
