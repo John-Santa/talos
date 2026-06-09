@@ -17,11 +17,13 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/John-Santa/talos/platform/ci-checks/adapter/jirarest"
 	"github.com/John-Santa/talos/platform/ci-checks/adapter/ownershipfile"
 	"github.com/John-Santa/talos/platform/ci-checks/domain/cichecks"
+	"github.com/John-Santa/talos/platform/ci-checks/internal/envfile"
 	"github.com/John-Santa/talos/platform/ci-checks/service"
 )
 
@@ -33,6 +35,19 @@ func main() {
 }
 
 func run(args []string, out io.Writer) error {
+	// R8 / ADR-J3: load env files BEFORE any os.Getenv call or flag default
+	// evaluation (e.g. fs.String("site-url", os.Getenv("JIRA_SITE_URL"), ...)).
+	// Real environment wins (if-unset semantics); CI is unaffected.
+	root := repoRoot()
+	paths := []string{
+		filepath.Join(root, ".talos", "project.env"),
+		filepath.Join(root, ".env"),
+	}
+	if mainRoot := mainWorktreeRoot(); mainRoot != "" && mainRoot != root {
+		paths = append(paths, filepath.Join(mainRoot, ".env"))
+	}
+	_ = envfile.LoadInto(os.Setenv, os.Getenv, paths...)
+
 	if len(args) == 0 {
 		return fmt.Errorf("subcommand required: labels | ownership | changed-modules")
 	}
@@ -62,6 +77,28 @@ func repoRoot() string {
 	}
 	wd, _ := os.Getwd()
 	return wd
+}
+
+// mainWorktreeRoot returns the main worktree checkout root when running inside
+// a linked worktree, enabling .env fallback from the primary checkout. Returns
+// "" on any error (best-effort).
+func mainWorktreeRoot() string {
+	out, err := exec.Command("git", "rev-parse", "--git-common-dir").Output()
+	if err != nil {
+		return ""
+	}
+	commonDir := strings.TrimSpace(string(out))
+	if commonDir == "" {
+		return ""
+	}
+	if !filepath.IsAbs(commonDir) {
+		wd, err := os.Getwd()
+		if err != nil {
+			return ""
+		}
+		commonDir = filepath.Join(wd, commonDir)
+	}
+	return filepath.Dir(commonDir)
 }
 
 // labelsJSON is the --json output shape for ch labels (REQ-JSON-1).
@@ -103,7 +140,7 @@ func cmdLabels(args []string, out io.Writer) error {
 
 	// CRITICAL: normalize only the figura segment to lowercase before ParseAgentBranch.
 	// GITHUB_HEAD_REF may deliver uppercase figura (e.g. agent/HERMES/TAL-5).
-	// The regex requires [a-z]+ for figura but TAL-N must remain uppercase.
+	// The regex requires [a-z]+ for figura but <projectKey>-N must remain uppercase.
 	normalizedBranch := normalizeBranchFigura(*branch)
 
 	email := os.Getenv("JIRA_EMAIL")
@@ -118,13 +155,20 @@ func cmdLabels(args []string, out io.Writer) error {
 	labelsClient := jirarest.NewClient(*siteURL, email, token)
 	ownershipReader := ownershipfile.NewReader(ownershipPath)
 	cfg := service.DefaultTALConfig()
+
+	// Override non-secret project identity from env (populated by
+	// .talos/project.env or inherited environment; REQ-IDENT).
+	if v := os.Getenv("JIRA_PROJECT_KEY"); v != "" {
+		cfg.Project = v
+	}
+
 	checker := service.NewChecker(cfg, labelsClient, ownershipReader)
 
 	ctx := context.Background()
 	result, checkErr := checker.Check(ctx, normalizedBranch)
 
 	if *jsonOut {
-		figura, jiraKey := extractBranchParts(normalizedBranch)
+		figura, jiraKey := extractBranchParts(normalizedBranch, cfg.Project)
 		rawLabels := extractLabels(ctx, labelsClient, jiraKey)
 
 		payload := buildLabelsJSON(*branch, jiraKey, figura, result, rawLabels, checkErr)
@@ -141,8 +185,8 @@ func cmdLabels(args []string, out io.Writer) error {
 	return nil
 }
 
-// normalizeBranchFigura lowercases only the figura segment of an agent/<figura>/TAL-N branch.
-// The Jira key segment (TAL-N) is left unchanged — the domain regex requires uppercase TAL.
+// normalizeBranchFigura lowercases only the figura segment of an agent/<figura>/<projectKey>-N branch.
+// The Jira key segment is left unchanged — the domain regex requires uppercase project key.
 func normalizeBranchFigura(branch string) string {
 	parts := strings.SplitN(branch, "/", 3)
 	if len(parts) == 3 && parts[0] == "agent" {
@@ -189,10 +233,11 @@ func buildLabelsJSON(branch, jiraKey, figura string, result cichecks.InvariantRe
 	}
 }
 
-// extractBranchParts returns (figura, jiraKey) from a normalized branch name.
+// extractBranchParts returns (figura, jiraKey) from a normalized branch name
+// using the caller-supplied projectKey for the domain regex.
 // If parsing fails, returns empty strings.
-func extractBranchParts(branch string) (figura, key string) {
-	f, k, err := cichecks.ParseAgentBranch(branch)
+func extractBranchParts(branch, projectKey string) (figura, key string) {
+	f, k, err := cichecks.ParseAgentBranch(branch, projectKey)
 	if err != nil {
 		return "", ""
 	}

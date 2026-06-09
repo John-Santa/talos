@@ -11,6 +11,7 @@ func TestParseAgentBranch(t *testing.T) {
 	tests := []struct {
 		name       string
 		branch     string
+		projectKey string
 		wantFigura string
 		wantKey    string
 		wantErr    bool
@@ -18,43 +19,63 @@ func TestParseAgentBranch(t *testing.T) {
 		{
 			name:       "canonical lowercase figura",
 			branch:     "agent/hermes/TAL-7",
+			projectKey: "TAL",
 			wantFigura: "hermes",
 			wantKey:    "TAL-7",
 		},
 		{
-			name:    "uppercase figura rejected by regex",
-			branch:  "agent/Hermes/TAL-7",
-			wantErr: true,
+			name:       "uppercase figura rejected by regex",
+			branch:     "agent/Hermes/TAL-7",
+			projectKey: "TAL",
+			wantErr:    true,
 		},
 		{
-			name:    "develop branch",
-			branch:  "develop",
-			wantErr: true,
+			name:       "develop branch",
+			branch:     "develop",
+			projectKey: "TAL",
+			wantErr:    true,
 		},
 		{
-			name:    "agent without jira key",
-			branch:  "agent/hermes/feature",
-			wantErr: true,
+			name:       "agent without jira key",
+			branch:     "agent/hermes/feature",
+			projectKey: "TAL",
+			wantErr:    true,
 		},
 		{
-			name:    "arbitrary branch",
-			branch:  "fix/typo",
-			wantErr: true,
+			name:       "arbitrary branch",
+			branch:     "fix/typo",
+			projectKey: "TAL",
+			wantErr:    true,
 		},
 		{
-			name:    "empty string",
-			branch:  "",
-			wantErr: true,
+			name:       "empty string",
+			branch:     "",
+			projectKey: "TAL",
+			wantErr:    true,
 		},
 		{
-			name:    "non-TAL key",
-			branch:  "agent/hermes/JIRA-7",
-			wantErr: true,
+			name:       "non-TAL key rejected under TAL projectKey",
+			branch:     "agent/hermes/JIRA-7",
+			projectKey: "TAL",
+			wantErr:    true,
+		},
+		{
+			name:       "different project key accepted",
+			branch:     "agent/hermes/FOO-7",
+			projectKey: "FOO",
+			wantFigura: "hermes",
+			wantKey:    "FOO-7",
+		},
+		{
+			name:       "FOO branch rejected under TAL projectKey",
+			branch:     "agent/hermes/FOO-7",
+			projectKey: "TAL",
+			wantErr:    true,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			figura, key, err := cichecks.ParseAgentBranch(tc.branch)
+			figura, key, err := cichecks.ParseAgentBranch(tc.branch, tc.projectKey)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got figura=%q key=%q", figura, key)
