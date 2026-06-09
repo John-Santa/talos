@@ -5,6 +5,7 @@
 //	ch labels          --branch BRANCH [--ownership-file F] [--site-url URL] [--json]
 //	ch ownership       [--ownership-file F] [--json]
 //	ch changed-modules [--json]  (reads changed file paths from stdin, one per line)
+//	ch judgment        --change SLUG [--changes-dir openspec/changes] [--json]
 package main
 
 import (
@@ -49,7 +50,7 @@ func run(args []string, out io.Writer) error {
 	_ = envfile.LoadInto(os.Setenv, os.Getenv, paths...)
 
 	if len(args) == 0 {
-		return fmt.Errorf("subcommand required: labels | ownership | changed-modules")
+		return fmt.Errorf("subcommand required: labels | ownership | changed-modules | judgment")
 	}
 	switch args[0] {
 	case "labels":
@@ -58,8 +59,10 @@ func run(args []string, out io.Writer) error {
 		return cmdOwnership(args[1:], out)
 	case "changed-modules":
 		return cmdChangedModules(os.Stdin, out, args[1:])
+	case "judgment":
+		return cmdJudgment(args[1:], out)
 	default:
-		return fmt.Errorf("unknown subcommand %q; available: labels, ownership, changed-modules", args[0])
+		return fmt.Errorf("unknown subcommand %q; available: labels, ownership, changed-modules, judgment", args[0])
 	}
 }
 
@@ -285,6 +288,95 @@ func cmdChangedModules(r io.Reader, out io.Writer, args []string) error {
 		fmt.Fprintln(out, m)
 	}
 	return nil
+}
+
+// judgmentJSON is the --json output shape for ch judgment (REQ-VALIDATOR-9).
+type judgmentJSON struct {
+	Change      string   `json:"change"`
+	Round       int      `json:"round"`
+	Judges      []string `json:"judges"`
+	Implementor string   `json:"implementor"`
+	Verdict     string   `json:"verdict"`
+	Violations  []string `json:"violations"`
+}
+
+// cmdJudgment implements the `ch judgment` subcommand.
+// It reads openspec/changes/<slug>/judgment-report.md, parses it, and calls
+// ApprovedFor. I/O is done here; the domain layer is pure on string.
+func cmdJudgment(args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("judgment", flag.ContinueOnError)
+	change := fs.String("change", "", "Change slug to validate (required)")
+	changesDir := fs.String("changes-dir", "openspec/changes", "Base directory for change artifacts")
+	jsonOut := fs.Bool("json", false, "Output result as JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if *change == "" {
+		return fmt.Errorf("judgment requires --change")
+	}
+
+	reportPath := filepath.Join(*changesDir, *change, "judgment-report.md")
+	data, readErr := os.ReadFile(reportPath)
+
+	if readErr != nil {
+		// File absent → ErrNoJudgmentReport.
+		if *jsonOut {
+			payload := judgmentJSON{
+				Change:     *change,
+				Verdict:    "MISSING",
+				Violations: []string{},
+			}
+			if err := writeJSON(out, payload); err != nil {
+				return err
+			}
+		}
+		return cichecks.ErrNoJudgmentReport
+	}
+
+	report, parseErr := cichecks.ParseJudgmentReport(string(data))
+
+	if parseErr != nil {
+		// Malformed report → collapse to ErrJudgmentNotApproved at the I/O boundary.
+		if *jsonOut {
+			payload := judgmentJSON{
+				Change:     *change,
+				Verdict:    "MALFORMED",
+				Violations: []string{parseErr.Error()},
+			}
+			if err := writeJSON(out, payload); err != nil {
+				return err
+			}
+		}
+		return &cichecks.ErrJudgmentNotApproved{Change: *change, Verdict: "MALFORMED"}
+	}
+
+	approvedErr := report.ApprovedFor(*change)
+
+	if *jsonOut {
+		violations := report.Violations
+		if violations == nil {
+			violations = []string{}
+		}
+		judges := report.Judges
+		if judges == nil {
+			judges = []string{}
+		}
+		payload := judgmentJSON{
+			Change:      report.Change,
+			Round:       report.Round,
+			Judges:      judges,
+			Implementor: report.Implementor,
+			Verdict:     report.Verdict,
+			Violations:  violations,
+		}
+		if err := writeJSON(out, payload); err != nil {
+			return err
+		}
+		return approvedErr
+	}
+
+	return approvedErr
 }
 
 func cmdOwnership(args []string, out io.Writer) error {
