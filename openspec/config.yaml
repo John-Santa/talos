@@ -34,6 +34,15 @@ review:
   require_judgment_day: true    # gate duro APPROVED pre-archive desde Fase 3 (HG5)
   reviewer_distinct_from_implementor: true
 
+# --- Reglas de archive (honradas por sdd-archive § "Apply any rules.archive") ---
+# Segunda línea de defensa agent-side del gate HG5; el enforcement duro es el job CI `judgment`.
+rules:
+  archive:
+    require_judgment_report: true        # el judgment-report.md debe existir en el change dir
+    judgment_verdict: APPROVED           # y su veredicto terminal debe ser APPROVED
+    judgment_report_path: judgment-report.md
+    escalation_authority: ZEUS           # ESCALATED → decide ZEUS, sin resolución automática (§12/§13)
+
 # --- Convenciones (detalle en CONSTITUTION.md) ---
 conventions:
   constitution: CONSTITUTION.md
