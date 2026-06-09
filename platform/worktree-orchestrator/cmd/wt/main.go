@@ -16,11 +16,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/John-Santa/talos/platform/worktree-orchestrator/adapter/gitcli"
 	"github.com/John-Santa/talos/platform/worktree-orchestrator/domain/worktree"
+	"github.com/John-Santa/talos/platform/worktree-orchestrator/internal/envfile"
 	"github.com/John-Santa/talos/platform/worktree-orchestrator/service"
 )
 
@@ -32,6 +34,10 @@ func main() {
 }
 
 func run(args []string) error {
+	// R8 / ADR-J3: load project.env BEFORE any os.Getenv evaluation.
+	// wt touches no secrets — only project.env (tracked), not .env.
+	_ = envfile.LoadInto(os.Setenv, os.Getenv, filepath.Join(repoRoot(), ".talos", "project.env"))
+
 	if len(args) == 0 {
 		return fmt.Errorf("subcommand required: create | list | teardown | env")
 	}
@@ -69,6 +75,9 @@ func newOrchestrator() *service.Orchestrator {
 	root := repoRoot()
 	cfg := service.DefaultTALConfig()
 	cfg.RepoRoot = root
+	if v := os.Getenv("JIRA_PROJECT_KEY"); v != "" {
+		cfg.Project = v
+	}
 	runner := gitcli.NewRunner(root)
 	return service.NewOrchestrator(runner, cfg)
 }

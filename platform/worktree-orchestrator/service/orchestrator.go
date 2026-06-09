@@ -26,6 +26,8 @@ type Config struct {
 	WorktreeBase string
 	// BaseBranch is the branch that new agent branches are cut from; defaults to "develop".
 	BaseBranch string
+	// Project is the Jira project key used to validate issue keys; defaults to "TAL".
+	Project string
 }
 
 // DefaultTALConfig returns a Config seeded with the Talos platform defaults.
@@ -33,6 +35,7 @@ func DefaultTALConfig() Config {
 	return Config{
 		WorktreeBase: "talos.wt",
 		BaseBranch:   "develop",
+		Project:      "TAL",
 	}
 }
 
@@ -56,7 +59,7 @@ func NewOrchestrator(runner port.GitRunner, cfg Config) *Orchestrator {
 
 // Create creates a new agent worktree for the given figura and Jira key.
 func (o *Orchestrator) Create(ctx context.Context, figura, jiraKey string, noFetch bool) error {
-	spec, err := worktree.NewWorktreeSpec(figura, jiraKey, o.cfg.WorktreeBase)
+	spec, err := worktree.NewWorktreeSpec(figura, jiraKey, o.cfg.WorktreeBase, o.cfg.Project)
 	if err != nil {
 		return err
 	}
@@ -147,7 +150,7 @@ func (o *Orchestrator) classifyWorktree(ctx context.Context, info worktree.Workt
 
 // Teardown removes the agent worktree for the given figura and Jira key.
 func (o *Orchestrator) Teardown(ctx context.Context, figura, jiraKey string, force, deleteBranch bool) error {
-	spec, err := worktree.NewWorktreeSpec(figura, jiraKey, o.cfg.WorktreeBase)
+	spec, err := worktree.NewWorktreeSpec(figura, jiraKey, o.cfg.WorktreeBase, o.cfg.Project)
 	if err != nil {
 		return err
 	}
@@ -199,7 +202,7 @@ func (o *Orchestrator) Teardown(ctx context.Context, figura, jiraKey string, for
 
 // Env re-derives and writes the .env file for an existing agent worktree, returning ErrWorktreeNotFound if absent.
 func (o *Orchestrator) Env(ctx context.Context, figura, jiraKey string) error {
-	spec, err := worktree.NewWorktreeSpec(figura, jiraKey, o.cfg.WorktreeBase)
+	spec, err := worktree.NewWorktreeSpec(figura, jiraKey, o.cfg.WorktreeBase, o.cfg.Project)
 	if err != nil {
 		return err
 	}

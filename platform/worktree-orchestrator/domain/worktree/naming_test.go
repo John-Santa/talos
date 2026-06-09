@@ -45,32 +45,59 @@ func TestParseFigura(t *testing.T) {
 
 func TestValidateJiraKey(t *testing.T) {
 	t.Parallel()
-	validKeys := []string{"TAL-1", "TAL-42", "TAL-100", "TAL-9999"}
-	for _, k := range validKeys {
-		k := k
-		t.Run("valid_"+k, func(t *testing.T) {
+
+	t.Run("TAL_project", func(t *testing.T) {
+		t.Parallel()
+		validKeys := []string{"TAL-1", "TAL-42", "TAL-100", "TAL-9999"}
+		for _, k := range validKeys {
+			k := k
+			t.Run("valid_"+k, func(t *testing.T) {
+				t.Parallel()
+				if err := worktree.ValidateJiraKey(k, "TAL"); err != nil {
+					t.Errorf("ValidateJiraKey(%q, TAL) returned unexpected error: %v", k, err)
+				}
+			})
+		}
+
+		invalidKeys := []string{"TAL-0", "tal-5", "FOO-1", "TAL-", "", "TAL", "1-TAL", "TAL-1a"}
+		for _, k := range invalidKeys {
+			k := k
+			t.Run("invalid_"+k, func(t *testing.T) {
+				t.Parallel()
+				err := worktree.ValidateJiraKey(k, "TAL")
+				if err == nil {
+					t.Fatalf("ValidateJiraKey(%q, TAL) expected error, got nil", k)
+				}
+				var e *worktree.ErrInvalidKey
+				if !errors.As(err, &e) {
+					t.Errorf("ValidateJiraKey(%q, TAL) error type = %T, want *ErrInvalidKey", k, err)
+				}
+			})
+		}
+	})
+
+	t.Run("FOO_project", func(t *testing.T) {
+		t.Parallel()
+
+		t.Run("FOO-1_valid_under_FOO", func(t *testing.T) {
 			t.Parallel()
-			if err := worktree.ValidateJiraKey(k); err != nil {
-				t.Errorf("ValidateJiraKey(%q) returned unexpected error: %v", k, err)
+			if err := worktree.ValidateJiraKey("FOO-1", "FOO"); err != nil {
+				t.Errorf("ValidateJiraKey(FOO-1, FOO) returned unexpected error: %v", err)
 			}
 		})
-	}
 
-	invalidKeys := []string{"TAL-0", "tal-5", "FOO-1", "TAL-", "", "TAL", "1-TAL", "TAL-1a"}
-	for _, k := range invalidKeys {
-		k := k
-		t.Run("invalid_"+k, func(t *testing.T) {
+		t.Run("TAL-1_rejected_under_FOO", func(t *testing.T) {
 			t.Parallel()
-			err := worktree.ValidateJiraKey(k)
+			err := worktree.ValidateJiraKey("TAL-1", "FOO")
 			if err == nil {
-				t.Fatalf("ValidateJiraKey(%q) expected error, got nil", k)
+				t.Fatal("ValidateJiraKey(TAL-1, FOO) expected error, got nil")
 			}
 			var e *worktree.ErrInvalidKey
 			if !errors.As(err, &e) {
-				t.Errorf("ValidateJiraKey(%q) error type = %T, want *ErrInvalidKey", k, err)
+				t.Errorf("error type = %T, want *ErrInvalidKey", err)
 			}
 		})
-	}
+	})
 }
 
 func TestBranchName(t *testing.T) {
@@ -124,7 +151,7 @@ func TestNewWorktreeSpec(t *testing.T) {
 
 	t.Run("happy_path", func(t *testing.T) {
 		t.Parallel()
-		spec, err := worktree.NewWorktreeSpec("hermes", "TAL-2", "talos.wt")
+		spec, err := worktree.NewWorktreeSpec("hermes", "TAL-2", "talos.wt", "TAL")
 		if err != nil {
 			t.Fatalf("NewWorktreeSpec unexpected error: %v", err)
 		}
@@ -144,7 +171,7 @@ func TestNewWorktreeSpec(t *testing.T) {
 
 	t.Run("invalid_figura", func(t *testing.T) {
 		t.Parallel()
-		_, err := worktree.NewWorktreeSpec("zeus", "TAL-1", "talos.wt")
+		_, err := worktree.NewWorktreeSpec("zeus", "TAL-1", "talos.wt", "TAL")
 		if err == nil {
 			t.Fatal("expected error for invalid figura, got nil")
 		}
@@ -156,9 +183,32 @@ func TestNewWorktreeSpec(t *testing.T) {
 
 	t.Run("invalid_key", func(t *testing.T) {
 		t.Parallel()
-		_, err := worktree.NewWorktreeSpec("atlas", "TAL-0", "talos.wt")
+		_, err := worktree.NewWorktreeSpec("atlas", "TAL-0", "talos.wt", "TAL")
 		if err == nil {
 			t.Fatal("expected error for invalid key, got nil")
+		}
+		var e *worktree.ErrInvalidKey
+		if !errors.As(err, &e) {
+			t.Errorf("error type = %T, want *ErrInvalidKey", err)
+		}
+	})
+
+	t.Run("FOO_key_valid_under_FOO_project", func(t *testing.T) {
+		t.Parallel()
+		spec, err := worktree.NewWorktreeSpec("hermes", "FOO-1", "talos.wt", "FOO")
+		if err != nil {
+			t.Fatalf("NewWorktreeSpec(FOO-1, FOO) unexpected error: %v", err)
+		}
+		if spec.JiraKey != "FOO-1" {
+			t.Errorf("spec.JiraKey = %q, want FOO-1", spec.JiraKey)
+		}
+	})
+
+	t.Run("FOO_key_rejected_under_TAL_project", func(t *testing.T) {
+		t.Parallel()
+		_, err := worktree.NewWorktreeSpec("hermes", "FOO-1", "talos.wt", "TAL")
+		if err == nil {
+			t.Fatal("expected error for FOO-1 under TAL project, got nil")
 		}
 		var e *worktree.ErrInvalidKey
 		if !errors.As(err, &e) {

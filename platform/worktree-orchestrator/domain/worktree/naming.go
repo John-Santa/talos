@@ -19,8 +19,6 @@ var roster = map[string]struct{}{
 	"argos":      {},
 }
 
-var jiraKeyRe = regexp.MustCompile(`^TAL-[1-9][0-9]*$`)
-
 // ParseFigura validates s against the agent roster and returns a Figura, or ErrInvalidFigure.
 func ParseFigura(s string) (Figura, error) {
 	if _, ok := roster[s]; !ok {
@@ -29,15 +27,16 @@ func ParseFigura(s string) (Figura, error) {
 	return Figura(s), nil
 }
 
-// ValidateJiraKey checks that key matches TAL-<n> (n >= 1), returning ErrInvalidKey if not.
-func ValidateJiraKey(key string) error {
-	if !jiraKeyRe.MatchString(key) {
+// ValidateJiraKey checks that key matches <projectKey>-N (N >= 1), returning ErrInvalidKey if not.
+func ValidateJiraKey(key, projectKey string) error {
+	re := regexp.MustCompile("^" + regexp.QuoteMeta(projectKey) + "-[1-9][0-9]*$")
+	if !re.MatchString(key) {
 		return &ErrInvalidKey{Key: key}
 	}
 	return nil
 }
 
-// BranchName returns the canonical branch name agent/<figura>/<TAL-N>.
+// BranchName returns the canonical branch name agent/<figura>/<key>.
 func BranchName(f Figura, jiraKey string) string {
 	return fmt.Sprintf("agent/%s/%s", f, jiraKey)
 }
@@ -55,13 +54,14 @@ type WorktreeSpec struct {
 	Path    string
 }
 
-// NewWorktreeSpec validates figura and jiraKey, then builds a WorktreeSpec with pre-derived Branch and Path.
-func NewWorktreeSpec(figura, jiraKey, worktreeBase string) (WorktreeSpec, error) {
+// NewWorktreeSpec validates figura and jiraKey against projectKey, then builds a WorktreeSpec
+// with pre-derived Branch and Path.
+func NewWorktreeSpec(figura, jiraKey, worktreeBase, projectKey string) (WorktreeSpec, error) {
 	f, err := ParseFigura(figura)
 	if err != nil {
 		return WorktreeSpec{}, err
 	}
-	if err := ValidateJiraKey(jiraKey); err != nil {
+	if err := ValidateJiraKey(jiraKey, projectKey); err != nil {
 		return WorktreeSpec{}, err
 	}
 	return WorktreeSpec{
