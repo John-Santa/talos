@@ -21,6 +21,7 @@ jobs:
     name: Invariante de labels (ch labels)
     runs-on: ubuntu-latest
     needs: branch-name
+    environment: develop
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
