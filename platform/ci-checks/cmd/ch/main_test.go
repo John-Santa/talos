@@ -548,6 +548,60 @@ func TestJudgment_JSON_MISSING(t *testing.T) {
 	}
 }
 
+// TestJudgment_JSON_ESCALATED verifies --json output shape when verdict is ESCALATED.
+func TestJudgment_JSON_ESCALATED(t *testing.T) {
+	changesDir := t.TempDir()
+	writeJudgmentFixture(t, changesDir, "my-change", judgmentReportContent("my-change", "ESCALATED"))
+
+	var buf bytes.Buffer
+	// run returns an error (ErrJudgmentNotApproved) but still writes JSON when --json is set
+	_ = run([]string{
+		"judgment",
+		"--change", "my-change",
+		"--changes-dir", changesDir,
+		"--json",
+	}, &buf)
+
+	var out judgmentJSONShape
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("failed to parse JSON: %v\nraw: %s", err, buf.String())
+	}
+	if out.Verdict != "ESCALATED" {
+		t.Errorf("verdict = %q, want ESCALATED", out.Verdict)
+	}
+	if out.Change != "my-change" {
+		t.Errorf("change = %q, want my-change", out.Change)
+	}
+	if out.Violations == nil {
+		t.Error("violations must not be nil; want empty slice")
+	}
+}
+
+// TestJudgment_JSON_MALFORMED verifies --json output shape when the report is malformed.
+func TestJudgment_JSON_MALFORMED(t *testing.T) {
+	changesDir := t.TempDir()
+	// Write a report with no JUDGMENT: line (malformed).
+	writeJudgmentFixture(t, changesDir, "my-change",
+		"**Change:** my-change\n**Round:** 1\n**Judges:** ARGOS-1, ARGOS-2\n**Implementor:** HERMES\n**Date:** 2026-06-09\n\nNo verdict line.\n")
+
+	var buf bytes.Buffer
+	// run returns an error but still writes JSON when --json is set
+	_ = run([]string{
+		"judgment",
+		"--change", "my-change",
+		"--changes-dir", changesDir,
+		"--json",
+	}, &buf)
+
+	var out judgmentJSONShape
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("failed to parse JSON: %v\nraw: %s", err, buf.String())
+	}
+	if out.Verdict != "MALFORMED" {
+		t.Errorf("verdict = %q, want MALFORMED", out.Verdict)
+	}
+}
+
 // TestExitCodeFor_Judgment_Rows verifies new error types map to exit code 1.
 func TestExitCodeFor_Judgment_Rows(t *testing.T) {
 	cases := []struct {

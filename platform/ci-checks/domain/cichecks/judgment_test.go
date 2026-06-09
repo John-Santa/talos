@@ -120,6 +120,34 @@ JUDGMENT: APPROVED
 			wantErrType:  "malformed",
 		},
 		{
+			name: "duplicate JUDGMENT lines is malformed",
+			md: `**Change:** my-change
+**Round:** 1
+**Judges:** ARGOS-1, ARGOS-2
+**Implementor:** HERMES
+**Date:** 2026-06-09
+
+JUDGMENT: ESCALATED
+JUDGMENT: APPROVED
+`,
+			change:       "my-change",
+			wantParseErr: true,
+			wantErrType:  "malformed",
+		},
+		{
+			name: "missing Change field is malformed",
+			md: `**Round:** 1
+**Judges:** ARGOS-1, ARGOS-2
+**Implementor:** HERMES
+**Date:** 2026-06-09
+
+JUDGMENT: APPROVED
+`,
+			change:       "my-change",
+			wantParseErr: true,
+			wantErrType:  "malformed",
+		},
+		{
 			name: "O-1 judges not 2 is surface-only violation",
 			md: `**Change:** my-change
 **Round:** 1

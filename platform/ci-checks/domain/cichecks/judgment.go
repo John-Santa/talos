@@ -39,14 +39,15 @@ func ParseJudgmentReport(md string) (JudgmentReport, error) {
 	lines := strings.Split(md, "\n")
 
 	var (
-		changeVal      string
-		roundVal       int
-		roundParsed    bool
-		judges         []string
-		implementor    string
-		datePresent    bool
-		verdict        string
-		rawVerdictLine string
+		changeVal        string
+		roundVal         int
+		roundParsed      bool
+		judges           []string
+		implementor      string
+		datePresent      bool
+		verdict          string
+		rawVerdictLine   string
+		judgmentLineCount int
 	)
 
 	for _, raw := range lines {
@@ -55,6 +56,7 @@ func ParseJudgmentReport(md string) (JudgmentReport, error) {
 
 		// Terminal verdict line — must start with "JUDGMENT:".
 		if strings.HasPrefix(trimmed, "JUDGMENT:") {
+			judgmentLineCount++
 			rawVerdictLine = trimmed
 			after := strings.TrimSpace(trimmed[len("JUDGMENT:"):])
 			// Strip trailing emoji characters (multi-byte; use field split).
@@ -87,6 +89,13 @@ func ParseJudgmentReport(md string) (JudgmentReport, error) {
 			case "Date":
 				datePresent = true
 			}
+		}
+	}
+
+	// Enforce exactly one JUDGMENT: line (REQ-ARTIFACT-4).
+	if judgmentLineCount > 1 {
+		return JudgmentReport{}, &ErrMalformedJudgment{
+			Detail: fmt.Sprintf("multiple JUDGMENT: lines found (%d); expected exactly one", judgmentLineCount),
 		}
 	}
 
