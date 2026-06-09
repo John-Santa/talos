@@ -15,12 +15,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/John-Santa/talos/platform/overlap-guard/adapter/gitcli"
 	"github.com/John-Santa/talos/platform/overlap-guard/adapter/jirarest"
 	"github.com/John-Santa/talos/platform/overlap-guard/adapter/wtcli"
 	"github.com/John-Santa/talos/platform/overlap-guard/domain/overlap"
+	"github.com/John-Santa/talos/platform/overlap-guard/internal/envfile"
 	"github.com/John-Santa/talos/platform/overlap-guard/service"
 )
 
@@ -32,6 +34,19 @@ func main() {
 }
 
 func run(args []string) error {
+	// R8 / ADR-J3: load env files BEFORE any os.Getenv call or flag default
+	// evaluation (e.g. fs.String("site-url", os.Getenv("JIRA_SITE_URL"), ...)).
+	// Real environment wins (if-unset semantics); CI is unaffected.
+	root := repoRoot()
+	paths := []string{
+		filepath.Join(root, ".talos", "project.env"),
+		filepath.Join(root, ".env"),
+	}
+	if mainRoot := mainWorktreeRoot(); mainRoot != "" && mainRoot != root {
+		paths = append(paths, filepath.Join(mainRoot, ".env"))
+	}
+	_ = envfile.LoadInto(os.Setenv, os.Getenv, paths...)
+
 	if len(args) == 0 {
 		return fmt.Errorf("subcommand required: check | scan | metric")
 	}
@@ -65,6 +80,28 @@ func repoRoot() string {
 	}
 	wd, _ := os.Getwd()
 	return wd
+}
+
+// mainWorktreeRoot returns the main worktree checkout root when running inside
+// a linked worktree, enabling .env fallback from the primary checkout. Returns
+// "" on any error (best-effort).
+func mainWorktreeRoot() string {
+	out, err := exec.Command("git", "rev-parse", "--git-common-dir").Output()
+	if err != nil {
+		return ""
+	}
+	commonDir := strings.TrimSpace(string(out))
+	if commonDir == "" {
+		return ""
+	}
+	if !filepath.IsAbs(commonDir) {
+		wd, err := os.Getwd()
+		if err != nil {
+			return ""
+		}
+		commonDir = filepath.Join(wd, commonDir)
+	}
+	return filepath.Dir(commonDir)
 }
 
 // fileCollisionJSON is a single entry in file_collisions[]. agents[] contains both agent identifiers (REQ-OUTPUT-1).
@@ -268,6 +305,9 @@ func cmdCheck(args []string) error {
 	cfg := service.DefaultTALConfig()
 	cfg.RepoRoot = root
 	cfg.SiteURL = *siteURL
+	if v := os.Getenv("JIRA_PROJECT_KEY"); v != "" {
+		cfg.Project = v
+	}
 
 	cfg.MaxResults = *maxResults
 	guard := service.NewGuard(searcher, nil, nil, cfg)
