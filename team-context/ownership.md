@@ -10,7 +10,7 @@
 | `module:backend-ctx1` | ATLAS | backend — bounded context #1 (nombre real ← `explore`) | slot |
 | `module:backend-ctx2` | HEPHAESTUS | backend — bounded context #2 (nombre real ← `explore`) | slot |
 | `module:backend-ctx3` | CRONOS | backend — bounded context #3 (nombre real ← `explore`) | slot |
-| `module:frontend` | IRIS | UI / interacción | slot |
+| `module:frontend` | IRIS | UI / interacción (consola Go ahora; web a futuro) | active |
 | `module:data` | GAIA | esquema / persistencia / migraciones | slot |
 | `module:qa` | THEMIS | tests / harness / métricas | slot |
 | `module:devops` | HERMES | CI / release / entornos | active |
@@ -40,3 +40,4 @@
 | `platform/merge-order-orchestrator/**` | HERMES | CLI `mo`, orden/integración de merge |
 | `platform/overlap-guard/**` | THEMIS | CLI `ov`, guard de solapamiento (module:qa) |
 | `platform/ci-checks/**` | HERMES | CLI `ch`, invariante §4 |
+| `platform/console/**` | IRIS | CLI/TUI `talos` (`module:frontend`); shell-out read-only a `wt`/`mo`/`ov`/`ch` + lectura de `ownership.md`/`openspec/`. NO importa cross-module. |
