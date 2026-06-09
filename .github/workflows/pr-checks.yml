@@ -94,7 +94,7 @@ jobs:
           # Derive archived change folders from the diff.
           # Only paths matching openspec/changes/archive/<date>-<slug>/ count.
           ARCHIVE_FOLDERS=$(git diff --name-only origin/${{ github.base_ref }}...HEAD \
-            | grep '^openspec/changes/archive/' \
+            | grep -E '^openspec/changes/archive/[^/]+/' \
             | sed -E 's#^openspec/changes/archive/([^/]+)/.*#\1#' \
             | sort -u)
           if [ -z "$ARCHIVE_FOLDERS" ]; then

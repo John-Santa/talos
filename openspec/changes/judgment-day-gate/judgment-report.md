@@ -1,39 +1,66 @@
+# Judgment Report: judgment-day-gate (TAL-7)
+
 **Change:** judgment-day-gate
-**Round:** 1
-**Judges:** ARGOS-1, ARGOS-2
-**Implementor:** HERMES
+**Round:** 2
+**Judges:** judge-a, judge-b
+**Implementor:** hermes
 **Date:** 2026-06-09
 
-## Summary
+## Resumen
 
-Round 1 adversarial review of `judgment-day-gate` (TAL-7, HERMES) conducted by two blind LLM judges.
+Revisión adversarial ciega (Judgment Day) del gate HG5 de Talos. Dos jueces independientes
+(opus, contexto fresco, distintos del implementor). Dos rondas: la primera versión fue
+**rechazada**; la endurecida fue **aprobada**.
 
-### ARGOS-1 — Review
+## Ronda 1 — ISSUES (rechazado)
 
-The implementation correctly introduces a `judgment-gate` capability: `ParseJudgmentReport` + `ApprovedFor` in the domain layer, `ch judgment` subcommand at the cmd layer, CI job in `pr-checks.yml`, and `rules.archive` in `config.yaml`. TDD evidence is present (RED→GREEN cycles documented in apply-progress). All six CRITICAL findings from Judgment Day Round 1 have been remediated:
+Ambos jueces, de forma independiente y convergente, encontraron agujeros reales:
 
-- **C1**: CI gate is now archive-scoped; non-archive PRs exit 0 with a notice, eliminating the bypass via empty CHANGES.
-- **C2**: Parser rewritten to strict last-non-empty-line rule with exact regex; all six bypass attack vectors are covered by RED tests that now pass GREEN.
-- **C3**: `--report` flag added to `ch judgment`; archive path is passed explicitly, eliminating the self-deadlock on archived folder.
+| ID | Severidad (consenso) | Hallazgo |
+|----|----|----|
+| C1 | CRÍTICO (A+B) | El job corría en cada PR a develop; un PR que no tocaba ningún `openspec/changes/<slug>/` daba CHANGES vacío y salía 0 → código sin gate mergeaba. Bypass. |
+| C2 | CRÍTICO (A) / real (B) | El parser matcheaba la marca de verdicto en cualquier lado (HasPrefix). 6 vectores: decoy + verdicto citado, trailing tokens, indentado, fenced, in-body, duplicados evadiendo el contador. |
+| C3 | real (A+B) | El gate corría en feature-merge, no en archive; y el archive mueve la carpeta a `archive/`, dejando el report fuera de ruta → self-deadlock del PR de archive. |
 
-Accepted v1 limits reviewed: forgeability (report is committed Markdown; provenance by ARGOS protocol + O-1 surface check, not cryptographic) and branch-protection scope (making `judgment` required + gating develop→main is ZEUS GitHub-config, out of repo code scope) — both are deliberate, documented deferrals.
+## Fixes aplicados
 
-No new findings. Verdict: APPROVED.
+- **C1 + C3** — Re-scope a **archive-time** (constitución §12: gate duro pre-`sdd-archive`). El job
+  dispara solo cuando el diff toca `openspec/changes/archive/<date>-<slug>/`; los feature PRs son
+  N/A (correcto, no bypass). Flag `--report` para pasar la ruta del report archivado; `--change`
+  sigue validando el header del change (defensa en profundidad).
+- **C2** — Parser de dos pasos: el verdicto debe ser la **última línea no-vacía**, match exacto en
+  columna 0, con unicidad doc-wide (más de una línea estricta → malformed). Los 6 vectores tienen
+  tests RED→GREEN.
 
-### ARGOS-2 — Review
+## Ronda 2 — verificación (APPROVED)
 
-Reviewed domain parser hardening (`judgment.go`), cmd flag extension (`main.go`), CI rework (`pr-checks.yml`), and openspec artifact updates. The two-pass architecture (header scan + last-non-empty-line verdict enforcement) is clean and eliminates all identified C2 vectors. The `--report` flag isolation is correct: it decouples path resolution from slug matching, allowing archive paths without relaxing the `**Change:**` header check. The archive-scoped CI job logic is sound: only `openspec/changes/archive/` paths trigger the gate, and the `YYYY-MM-DD-` prefix stripping is deterministic.
+Ambos jueces reconstruyeron `ch`, corrieron la suite fresca y reprodujeron cada ataque de Ronda 1
+más evasiones nuevas (CRLF, tabs, NBSP, look-alikes Unicode, fences, trailing whitespace/blank
+lines). Resultado:
 
-Noted: `sdd-archive` moves the folder to `archive/`, so the report path changes — the `--report` flag makes this transparent to `ch`. Self-proof: this report is the dog-food bootstrap (D-5); the gate passes on this very PR, proving the mechanism is live.
+- **C1 — RESUELTO** (ambos, con evidencia): archive-scoped; el store hybrid siempre escribe
+  `archive/<date>-<slug>/`, así que todo archive real dispara el gate; omitir el report da exit 1.
+- **C2 — RESUELTO** (ambos): los 6 vectores y todas las evasiones nuevas fallan-cerrado; los reports
+  válidos siguen correctos.
+- **C3 — RESUELTO** (ambos): `--report` desacopla la ruta del match de slug; header mismatch bloquea.
 
-No critical findings. Verdict: APPROVED.
+Un WARNING-real compartido (fail-**cerrado**, no bypass): un archivo suelto directo bajo `archive/`
+causaba un falso-positivo que bloqueaba un PR legítimo. Fix aplicado: anclar el grep a un subfolder
+(`^openspec/changes/archive/[^/]+/`). Verificado: archivos sueltos ya no matchean, folders reales sí.
 
-## Judgment Day Round 1 — Resolved Findings
+## Límites v1 aceptados (documentados)
 
-| ID | Severity | Finding | Resolution |
-|----|----------|---------|------------|
-| C1 | CRITICAL | Non-archive PRs trigger gate with empty CHANGES → bypass | CI job now fires only for `openspec/changes/archive/` paths |
-| C2 | CRITICAL | `HasPrefix` parser accepts indented, fenced, trailing-text, decoy+real lines | Strict two-pass parser: last-non-empty-line + exact regex + uniqueness count |
-| C3 | CRITICAL | Archive moves folder → report path vanishes → self-deadlock | `--report` flag passes explicit path; slug used only for header match |
+- **Forjabilidad**: el report es Markdown committeado; su procedencia es por protocolo ARGOS más el
+  check implementor-no-es-juez (O-1, surface-only), no criptográfica.
+- **Branch protection / main path**: hacer `judgment` un required check y gatear `develop→main` es
+  config de GitHub de ZEUS, fuera del scope de código del repo.
+
+## Tabla de resolución
+
+| ID | Severidad | Resolución |
+|----|----|----|
+| C1 | CRÍTICO | Gate archive-scoped; feature PRs N/A |
+| C2 | CRÍTICO | Parser estricto última-línea + unicidad |
+| C3 | real | Flag `--report` con ruta de archive explícita |
 
 JUDGMENT: APPROVED ✅
