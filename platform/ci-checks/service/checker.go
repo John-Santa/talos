@@ -24,7 +24,7 @@ func NewChecker(cfg Config, labels port.IssueLabelReader, ownership port.Ownersh
 // Returns ErrLabelInvariant when one or more sub-rules are violated.
 // Other errors from ports (ErrIssueNotFound, HTTPError, ErrMalformedOwnership) are bubbled as-is.
 func (c *Checker) Check(ctx context.Context, branch string) (cichecks.InvariantResult, error) {
-	figura, key, err := cichecks.ParseAgentBranch(branch)
+	figura, key, err := cichecks.ParseAgentBranch(branch, c.cfg.Project)
 	if err != nil {
 		return cichecks.InvariantResult{}, err
 	}

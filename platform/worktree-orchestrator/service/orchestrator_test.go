@@ -57,7 +57,7 @@ func TestCreate_HappyPath(t *testing.T) {
 		t.Errorf("WriteFile path = %q, want %q", wf.path, wantPath)
 	}
 
-	spec, _ := worktree.NewWorktreeSpec("hermes", "TAL-2", "talos.wt")
+	spec, _ := worktree.NewWorktreeSpec("hermes", "TAL-2", "talos.wt", "TAL")
 	res, _ := worktree.AgentResources(spec.Figura)
 	wantContent := worktree.RenderEnv(spec, res)
 	if string(wf.data) != wantContent {
@@ -442,7 +442,7 @@ func TestEnv_HappyPath(t *testing.T) {
 		t.Fatal("WriteFile was not called")
 	}
 
-	spec, _ := worktree.NewWorktreeSpec("hermes", "TAL-2", "talos.wt")
+	spec, _ := worktree.NewWorktreeSpec("hermes", "TAL-2", "talos.wt", "TAL")
 	res, _ := worktree.AgentResources(spec.Figura)
 	wantContent := worktree.RenderEnv(spec, res)
 	if string(wf.data) != wantContent {

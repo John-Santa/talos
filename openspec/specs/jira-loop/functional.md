@@ -23,8 +23,12 @@ deterministically over the Jira REST v3 API.
 ### REQ-AUTH-1: Credential source
 **Given** the process environment,
 **When** the loop initialises,
-**Then** it MUST read credentials exclusively from the `JIRA_EMAIL` and `JIRA_API_TOKEN` environment
-variables and MUST NOT read or write any other credential store.
+**Then** secrets (`JIRA_EMAIL`, `JIRA_API_TOKEN`) MUST be sourced exclusively from the environment
+(populated by a gitignored `.env` file or an inherited environment) and MUST NOT appear in flags,
+logs, or any committed file.
+Non-secret project identity (`JIRA_SITE_URL`, `JIRA_PROJECT_KEY`, `JIRA_PROJECT_ID`) MAY be
+pre-populated from `.talos/project.env`, which is a committed, non-secret runtime mirror of
+`openspec/config.yaml:jira`. Real environment variables always win (if-unset load semantics).
 
 ### REQ-AUTH-2: Missing credentials fail fast
 **Given** that either `JIRA_EMAIL` or `JIRA_API_TOKEN` is absent or empty,

@@ -8,8 +8,8 @@ import (
 )
 
 // ErrNoJiraKey is returned when the branch name does not match the canonical
-// agent/<figura>/TAL-N format and no JIRA key can be extracted.
-var ErrNoJiraKey = errors.New("ci-checks: branch has no extractable JIRA key (expected agent/<figura>/TAL-N)")
+// agent/<figura>/<projectKey>-N format and no Jira key can be extracted.
+var ErrNoJiraKey = errors.New("ci-checks: branch has no extractable Jira key (expected agent/<figura>/<projectKey>-N)")
 
 // ErrLabelInvariant is returned when one or more label invariant sub-rules (a)(b)(c)(d) are violated.
 type ErrLabelInvariant struct {

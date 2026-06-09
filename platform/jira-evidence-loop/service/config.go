@@ -12,8 +12,10 @@ const (
 	StatusCategoryDone          = "done"
 )
 
-// Credentials holds the Jira authentication data sourced exclusively from
-// environment variables. They must never appear in flags, logs, or config files.
+// Credentials holds the Jira authentication secrets (JIRA_EMAIL, JIRA_API_TOKEN)
+// sourced exclusively from the environment or a gitignored .env file. They must
+// never appear in flags, logs, or committed files. Non-secret project identity
+// (site URL, project key/ID) may live in committed .talos/project.env.
 type Credentials struct {
 	Email    string
 	APIToken string
