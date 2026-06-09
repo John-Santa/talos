@@ -301,12 +301,21 @@ type judgmentJSON struct {
 }
 
 // cmdJudgment implements the `ch judgment` subcommand.
-// It reads openspec/changes/<slug>/judgment-report.md, parses it, and calls
-// ApprovedFor. I/O is done here; the domain layer is pure on string.
+//
+// It reads the judgment-report.md for the given change slug, parses it, and
+// calls ApprovedFor. I/O is performed here; the domain layer is pure on string.
+//
+// The --report flag overrides the default derived path
+// (<changes-dir>/<slug>/judgment-report.md). This enables the archive-scoped
+// CI gate to pass the exact path of the archived report (e.g.
+// openspec/changes/archive/2026-06-09-my-change/judgment-report.md) without
+// restructuring the directory. --change is still used for the **Change:**
+// header match (defense-in-depth).
 func cmdJudgment(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("judgment", flag.ContinueOnError)
 	change := fs.String("change", "", "Change slug to validate (required)")
 	changesDir := fs.String("changes-dir", "openspec/changes", "Base directory for change artifacts")
+	reportFlag := fs.String("report", "", "Explicit path to judgment-report.md (overrides derived path)")
 	jsonOut := fs.Bool("json", false, "Output result as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -316,7 +325,11 @@ func cmdJudgment(args []string, out io.Writer) error {
 		return fmt.Errorf("judgment requires --change")
 	}
 
-	reportPath := filepath.Join(*changesDir, *change, "judgment-report.md")
+	// Derive the report path: explicit --report wins over the default convention.
+	reportPath := *reportFlag
+	if reportPath == "" {
+		reportPath = filepath.Join(*changesDir, *change, "judgment-report.md")
+	}
 	data, readErr := os.ReadFile(reportPath)
 
 	if readErr != nil {
