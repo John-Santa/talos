@@ -43,3 +43,34 @@ type ErrIssueNotFound struct {
 func (e ErrIssueNotFound) Error() string {
 	return fmt.Sprintf("ci-checks: issue %q not found in Jira (HTTP 404)", e.Key)
 }
+
+// ErrNoJudgmentReport is returned when the judgment-report.md file is absent
+// at the canonical path openspec/changes/{change}/judgment-report.md.
+var ErrNoJudgmentReport = errors.New("ci-checks: judgment-report.md not found")
+
+// ErrJudgmentNotApproved is returned when the report exists but the verdict is
+// not APPROVED (ESCALATED, malformed header, Round < 1, change-mismatch, or
+// missing terminal JUDGMENT: line).
+type ErrJudgmentNotApproved struct {
+	// Change is the slug that was requested.
+	Change string
+	// Verdict is the parsed verdict string, or "MALFORMED" / "ESCALATED".
+	Verdict string
+}
+
+// Error returns a message describing the non-approved state.
+func (e *ErrJudgmentNotApproved) Error() string {
+	return fmt.Sprintf("ci-checks: judgment report for %q is not approved (verdict: %s)", e.Change, e.Verdict)
+}
+
+// ErrMalformedJudgment is an internal sentinel for parse failures inside the
+// domain; it is collapsed to ErrJudgmentNotApproved at the cmd I/O boundary.
+type ErrMalformedJudgment struct {
+	// Detail describes the specific parse failure.
+	Detail string
+}
+
+// Error returns a message identifying the malformed field or condition.
+func (e *ErrMalformedJudgment) Error() string {
+	return fmt.Sprintf("ci-checks: malformed judgment report: %s", e.Detail)
+}
