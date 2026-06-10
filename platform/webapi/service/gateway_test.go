@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/John-Santa/talos/platform/webapi/domain"
@@ -39,7 +40,11 @@ func (fakeReader) Ready(context.Context) error { return nil }
 
 func (fakeReader) CreateWorktree(context.Context, string, string) error { return nil }
 func (fakeReader) TeardownWorktree(context.Context, string) error       { return nil }
-func (fakeReader) Merge(context.Context, string) error                  { return nil }
+func (fakeReader) Merge(_ context.Context, figura, jiraKey string) error {
+	_ = figura
+	_ = jiraKey
+	return nil
+}
 
 func newGateway() *Gateway { return NewGateway(fakeReader{}, fakeReader{}) }
 
@@ -99,7 +104,7 @@ func TestGatewayWriteDelegation(t *testing.T) {
 	if err := g.TeardownWorktree(ctx, "atlas"); err != nil {
 		t.Errorf("TeardownWorktree = %v", err)
 	}
-	if err := g.MergeWorktree(ctx, "TAL-15"); err != nil {
+	if err := g.MergeWorktree(ctx, "iris", "TAL-15"); err != nil {
 		t.Errorf("MergeWorktree = %v", err)
 	}
 }
@@ -111,5 +116,63 @@ func TestGatewayJudgmentMinimal(t *testing.T) {
 	}
 	if rev.JiraKey != "TAL-15" || rev.Verdict != "agree" {
 		t.Errorf("judgment = %+v, want minimal agree", rev)
+	}
+}
+
+// --- PR2 tests ---------------------------------------------------------------
+
+func TestAgentNormalizesCase(t *testing.T) {
+	tests := []struct {
+		name    string
+		figura  string
+		wantErr bool
+	}{
+		{name: "mixed-case Hermes → 200", figura: "Hermes", wantErr: false},
+		{name: "all-caps HERMES → 200", figura: "HERMES", wantErr: false},
+		{name: "lower hermes → 200", figura: "hermes", wantErr: false},
+		{name: "unknown unicorn → error", figura: "unicorn", wantErr: true},
+	}
+	g := newGateway()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			detail, err := g.Agent(context.Background(), tt.figura)
+			if tt.wantErr && err == nil {
+				t.Errorf("expected error for figura %q, got detail %+v", tt.figura, detail)
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("unexpected error for figura %q: %v", tt.figura, err)
+			}
+			if !tt.wantErr && detail.Agent.ID != "hermes" {
+				t.Errorf("agent.ID = %q, want hermes", detail.Agent.ID)
+			}
+		})
+	}
+}
+
+func TestCreateWorktreeRejectsUnknownFigura(t *testing.T) {
+	tests := []struct {
+		name     string
+		figura   string
+		wantErr  bool
+		wantCode bool // true = expect ErrUnknownFigura
+	}{
+		{name: "valid figura iris → ok", figura: "iris", wantErr: false},
+		{name: "invalid figura bogus → ErrUnknownFigura", figura: "bogus", wantErr: true, wantCode: true},
+		{name: "mixed-case Iris → ok (normalized)", figura: "Iris", wantErr: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := newGateway()
+			err := g.CreateWorktree(context.Background(), tt.figura, "TAL-99")
+			if tt.wantErr && err == nil {
+				t.Errorf("expected error for figura %q", tt.figura)
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("unexpected error for figura %q: %v", tt.figura, err)
+			}
+			if tt.wantCode && !errors.Is(err, domain.ErrUnknownFigura) {
+				t.Errorf("expected ErrUnknownFigura for figura %q, got: %v", tt.figura, err)
+			}
+		})
 	}
 }

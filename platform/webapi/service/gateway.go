@@ -47,6 +47,7 @@ func (g *Gateway) Agents(_ context.Context) []domain.Agent {
 // Agent returns an agent's detail. DoD and activity have no offline source, so
 // they come back empty; the worktree (if any) is real.
 func (g *Gateway) Agent(ctx context.Context, figura string) (domain.AgentDetail, error) {
+	figura = domain.NormalizeFigura(figura)
 	agent, ok := domain.AgentByID(figura)
 	if !ok {
 		return domain.AgentDetail{}, fmt.Errorf("unknown figura %q", figura)
@@ -84,6 +85,10 @@ func (g *Gateway) Judgment(_ context.Context, jiraKey string) (domain.JudgmentRe
 
 // CreateWorktree spins up an isolated worktree for a figura.
 func (g *Gateway) CreateWorktree(ctx context.Context, figura, jiraKey string) error {
+	figura = domain.NormalizeFigura(figura)
+	if _, ok := domain.AgentByID(figura); !ok {
+		return domain.ErrUnknownFigura
+	}
 	return g.writer.CreateWorktree(ctx, figura, jiraKey)
 }
 
@@ -93,6 +98,6 @@ func (g *Gateway) TeardownWorktree(ctx context.Context, figura string) error {
 }
 
 // MergeWorktree merges a worktree's branch into the base (guarded).
-func (g *Gateway) MergeWorktree(ctx context.Context, jiraKey string) error {
-	return g.writer.Merge(ctx, jiraKey)
+func (g *Gateway) MergeWorktree(ctx context.Context, figura, jiraKey string) error {
+	return g.writer.Merge(ctx, figura, jiraKey)
 }

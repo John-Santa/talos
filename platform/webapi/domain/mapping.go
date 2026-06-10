@@ -131,7 +131,7 @@ func BuildSnapshot(wts []WtEntry, plan MoPlan, scan OvScan, ownership map[string
 		},
 		Gate:       DefaultGate(),
 		IdleAgents: idleAgents(active),
-		Slots:      Slots{Used: len(worktrees), Total: 7},
+		Slots:      Slots{Used: len(worktrees), Total: len(devRoster)},
 	}
 }
 

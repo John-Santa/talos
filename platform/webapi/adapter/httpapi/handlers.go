@@ -22,7 +22,7 @@ type Service interface {
 
 	CreateWorktree(ctx context.Context, figura, jiraKey string) error
 	TeardownWorktree(ctx context.Context, figura string) error
-	MergeWorktree(ctx context.Context, jiraKey string) error
+	MergeWorktree(ctx context.Context, figura, jiraKey string) error
 }
 
 // New wires the read-only routes, CORS, and request logging.
@@ -85,6 +85,10 @@ func New(svc Service, corsOrigin string, logger *slog.Logger) http.Handler {
 			return
 		}
 		if err := svc.CreateWorktree(r.Context(), in.Figura, in.JiraKey); err != nil {
+			if errors.Is(err, domain.ErrUnknownFigura) {
+				writeError(w, http.StatusBadRequest, err)
+				return
+			}
 			writeError(w, http.StatusBadGateway, err)
 			return
 		}
@@ -100,7 +104,14 @@ func New(svc Service, corsOrigin string, logger *slog.Logger) http.Handler {
 	})
 
 	mux.HandleFunc("POST /api/merge/{jiraKey}", func(w http.ResponseWriter, r *http.Request) {
-		if err := svc.MergeWorktree(r.Context(), r.PathValue("jiraKey")); err != nil {
+		var in struct {
+			Figura string `json:"figura"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Figura == "" {
+			writeError(w, http.StatusBadRequest, errors.New("figura is required"))
+			return
+		}
+		if err := svc.MergeWorktree(r.Context(), in.Figura, r.PathValue("jiraKey")); err != nil {
 			writeError(w, http.StatusBadGateway, err)
 			return
 		}
