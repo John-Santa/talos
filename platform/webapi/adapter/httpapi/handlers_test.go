@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/John-Santa/talos/platform/webapi/domain"
@@ -37,9 +38,19 @@ func (fakeSvc) Judgment(_ context.Context, jiraKey string) (domain.JudgmentRevie
 	return domain.JudgmentReview{JiraKey: jiraKey, Gate: "HG5", Verdict: "agree"}, nil
 }
 
+func (fakeSvc) CreateWorktree(context.Context, string, string) error { return nil }
+func (fakeSvc) TeardownWorktree(context.Context, string) error       { return nil }
+func (fakeSvc) MergeWorktree(context.Context, string) error          { return nil }
+
 func do(h http.Handler, method, path string) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(method, path, nil))
+	return rec
+}
+
+func doBody(h http.Handler, method, path, body string) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader(body)))
 	return rec
 }
 
@@ -107,5 +118,38 @@ func TestCORSPreflight(t *testing.T) {
 	rec := do(New(fakeSvc{}, "*", nil), http.MethodOptions, "/api/orchestration")
 	if rec.Code != http.StatusNoContent {
 		t.Errorf("preflight status = %d, want 204", rec.Code)
+	}
+}
+
+func TestCreateWorktreeRoute(t *testing.T) {
+	rec := doBody(
+		New(fakeSvc{}, "*", nil),
+		http.MethodPost,
+		"/api/worktrees",
+		`{"figura":"atlas","jiraKey":"TAL-99"}`,
+	)
+	if rec.Code != http.StatusCreated {
+		t.Errorf("create status = %d, want 201", rec.Code)
+	}
+}
+
+func TestCreateWorktreeValidation(t *testing.T) {
+	rec := doBody(New(fakeSvc{}, "*", nil), http.MethodPost, "/api/worktrees", `{}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("invalid create status = %d, want 400", rec.Code)
+	}
+}
+
+func TestTeardownRoute(t *testing.T) {
+	rec := do(New(fakeSvc{}, "*", nil), http.MethodDelete, "/api/worktrees/atlas")
+	if rec.Code != http.StatusOK {
+		t.Errorf("teardown status = %d, want 200", rec.Code)
+	}
+}
+
+func TestMergeRoute(t *testing.T) {
+	rec := do(New(fakeSvc{}, "*", nil), http.MethodPost, "/api/merge/TAL-15")
+	if rec.Code != http.StatusOK {
+		t.Errorf("merge status = %d, want 200", rec.Code)
 	}
 }

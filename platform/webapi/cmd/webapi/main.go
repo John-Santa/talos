@@ -32,7 +32,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	svc := service.NewGateway(reader)
+	svc := service.NewGateway(reader, reader)
 	handler := httpapi.New(svc, os.Getenv("WEBAPI_CORS_ORIGIN"), logger)
 
 	srv := &http.Server{

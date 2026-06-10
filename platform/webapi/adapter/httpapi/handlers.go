@@ -4,6 +4,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
@@ -18,6 +19,10 @@ type Service interface {
 	Agents(ctx context.Context) []domain.Agent
 	Agent(ctx context.Context, figura string) (domain.AgentDetail, error)
 	Judgment(ctx context.Context, jiraKey string) (domain.JudgmentReview, error)
+
+	CreateWorktree(ctx context.Context, figura, jiraKey string) error
+	TeardownWorktree(ctx context.Context, figura string) error
+	MergeWorktree(ctx context.Context, jiraKey string) error
 }
 
 // New wires the read-only routes, CORS, and request logging.
@@ -70,6 +75,38 @@ func New(svc Service, corsOrigin string, logger *slog.Logger) http.Handler {
 		writeJSON(w, http.StatusOK, review)
 	})
 
+	mux.HandleFunc("POST /api/worktrees", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Figura  string `json:"figura"`
+			JiraKey string `json:"jiraKey"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Figura == "" || in.JiraKey == "" {
+			writeError(w, http.StatusBadRequest, errors.New("figura and jiraKey are required"))
+			return
+		}
+		if err := svc.CreateWorktree(r.Context(), in.Figura, in.JiraKey); err != nil {
+			writeError(w, http.StatusBadGateway, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]string{"status": "created"})
+	})
+
+	mux.HandleFunc("DELETE /api/worktrees/{figura}", func(w http.ResponseWriter, r *http.Request) {
+		if err := svc.TeardownWorktree(r.Context(), r.PathValue("figura")); err != nil {
+			writeError(w, http.StatusBadGateway, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+	})
+
+	mux.HandleFunc("POST /api/merge/{jiraKey}", func(w http.ResponseWriter, r *http.Request) {
+		if err := svc.MergeWorktree(r.Context(), r.PathValue("jiraKey")); err != nil {
+			writeError(w, http.StatusBadGateway, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "merged"})
+	})
+
 	return withLogging(logger, withCORS(corsOrigin, mux))
 }
 
@@ -79,7 +116,7 @@ func withCORS(origin string, next http.Handler) http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
