@@ -42,6 +42,18 @@ func (fakeReader) Labels(_ context.Context, _ string) (domain.ChLabels, error) {
 	return domain.ChLabels{}, nil
 }
 
+func (fakeReader) Activity(_ context.Context, _ string) ([]domain.ActivityEntry, error) {
+	return []domain.ActivityEntry{}, nil
+}
+
+func (fakeReader) RunsJudgment(_ context.Context, jiraKey string) (domain.JudgmentReview, error) {
+	return domain.JudgmentReview{JiraKey: jiraKey, Pending: true}, nil
+}
+
+func (fakeReader) RunsDoD(_ context.Context, _ string) ([]domain.DoDItem, error) {
+	return []domain.DoDItem{}, nil
+}
+
 func (fakeReader) CreateWorktree(context.Context, string, string) error { return nil }
 func (fakeReader) TeardownWorktree(context.Context, string) error       { return nil }
 func (fakeReader) Merge(_ context.Context, figura, jiraKey string) error {
@@ -222,6 +234,129 @@ func TestAgentNormalizesCase(t *testing.T) {
 				t.Errorf("agent.ID = %q, want hermes", detail.Agent.ID)
 			}
 		})
+	}
+}
+
+// --- gateway-runs-wiring: Activity / Judgment wired through runs ---------------
+
+// fakeReaderWithRuns extends fakeReader with Activity / RunsJudgment / RunsDoD.
+type fakeReaderWithRuns struct {
+	fakeReader
+	activity    []domain.ActivityEntry
+	actErr      error
+	judgment    domain.JudgmentReview
+	judgErr     error
+	runsDoD     []domain.DoDItem
+	runsDoDErr  error
+}
+
+func (f fakeReaderWithRuns) Activity(_ context.Context, _ string) ([]domain.ActivityEntry, error) {
+	return f.activity, f.actErr
+}
+
+func (f fakeReaderWithRuns) RunsJudgment(_ context.Context, _ string) (domain.JudgmentReview, error) {
+	return f.judgment, f.judgErr
+}
+
+func (f fakeReaderWithRuns) RunsDoD(_ context.Context, _ string) ([]domain.DoDItem, error) {
+	return f.runsDoD, f.runsDoDErr
+}
+
+// TestAgentActivityFromRuns verifies that Agent() populates Activity from
+// reader.Activity() instead of returning the empty placeholder.
+func TestAgentActivityFromRuns(t *testing.T) {
+	acts := []domain.ActivityEntry{
+		{At: "2026-06-10T10:00:00Z", Text: "apply started"},
+		{At: "2026-06-10T11:00:00Z", Text: "verify passed"},
+	}
+	r := fakeReaderWithRuns{activity: acts}
+	g := NewGateway(r, fakeReader{})
+	detail, err := g.Agent(context.Background(), "hermes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.Activity) != 2 {
+		t.Fatalf("Activity len = %d, want 2; entries: %+v", len(detail.Activity), detail.Activity)
+	}
+	if detail.Activity[0].Text != "apply started" {
+		t.Errorf("Activity[0].Text = %q, want %q", detail.Activity[0].Text, "apply started")
+	}
+}
+
+// TestAgentActivityDegrades verifies that when runs is unavailable (Activity returns
+// error / empty), Agent() still succeeds and returns an empty (non-nil) Activity.
+func TestAgentActivityDegrades(t *testing.T) {
+	r := fakeReaderWithRuns{activity: nil, actErr: nil}
+	g := NewGateway(r, fakeReader{})
+	detail, err := g.Agent(context.Background(), "hermes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Activity == nil {
+		t.Error("Activity must be non-nil even when runs returns nothing")
+	}
+}
+
+// TestJudgmentFromRunsWhenDataPresent verifies that Judgment() uses the real
+// JudgmentReview from runs when runs has data (Pending=false).
+func TestJudgmentFromRunsWhenDataPresent(t *testing.T) {
+	realReview := domain.JudgmentReview{
+		JiraKey:  "TAL-42",
+		Gate:     "HG5",
+		Judges:   []domain.Judge{{ID: "cronos", Verdict: "APPROVED", Note: ""}},
+		FixAgent: "idle",
+		Verdict:  "agree",
+		Pending:  false,
+	}
+	r := fakeReaderWithRuns{judgment: realReview}
+	g := NewGateway(r, fakeReader{})
+	rev, err := g.Judgment(context.Background(), "TAL-42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rev.Pending {
+		t.Errorf("Judgment.Pending = true, want false — runs has real data")
+	}
+	if rev.JiraKey != "TAL-42" {
+		t.Errorf("Judgment.JiraKey = %q, want TAL-42", rev.JiraKey)
+	}
+	if len(rev.Judges) != 1 || rev.Judges[0].ID != "cronos" {
+		t.Errorf("Judgment.Judges = %+v, want [{cronos APPROVED}]", rev.Judges)
+	}
+}
+
+// TestJudgmentFallbackToPendingWhenRunsHasNoData verifies that Judgment() falls
+// back to Pending:true when runs returns Pending (no events recorded).
+func TestJudgmentFallbackToPendingWhenRunsHasNoData(t *testing.T) {
+	pendingReview := domain.JudgmentReview{
+		JiraKey: "TAL-42",
+		Pending: true,
+	}
+	r := fakeReaderWithRuns{judgment: pendingReview}
+	g := NewGateway(r, fakeReader{})
+	rev, err := g.Judgment(context.Background(), "TAL-42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rev.Pending {
+		t.Errorf("Judgment.Pending = false, want true when runs has no data")
+	}
+}
+
+// TestJudgmentFallbackWhenRunsErrors verifies that when RunsJudgment() returns
+// an error, Judgment() degrades to Pending:true — no 500, no panic.
+func TestJudgmentFallbackWhenRunsErrors(t *testing.T) {
+	r := fakeReaderWithRuns{
+		judgment: domain.JudgmentReview{},
+		judgErr:  errors.New("runs: store not found"),
+	}
+	g := NewGateway(r, fakeReader{})
+	rev, err := g.Judgment(context.Background(), "TAL-42")
+	if err != nil {
+		t.Fatalf("Judgment must not return error when runs degrades, got: %v", err)
+	}
+	if !rev.Pending {
+		t.Errorf("Judgment.Pending = false, want true on runs error")
 	}
 }
 

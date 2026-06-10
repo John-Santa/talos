@@ -331,6 +331,167 @@ func TestLabelsFallbackWhenChNotFound(t *testing.T) {
 	}
 }
 
+// --- gateway-runs-wiring: Activity / RunsJudgment / RunsDoD via runsRun -------
+
+// TestActivityReturnsParsedRunsOutput verifies that Activity() deserializes
+// the JSON array emitted by `runs timeline --jira-key K --json`.
+func TestActivityReturnsParsedRunsOutput(t *testing.T) {
+	entries := []domain.ActivityEntry{
+		{At: "2026-06-10T10:00:00Z", Text: "apply started"},
+		{At: "2026-06-10T11:00:00Z", Text: "verify passed"},
+	}
+	data, err := json.Marshal(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := New("/repo", "develop")
+	r.runsRun = func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+		return data, nil
+	}
+	got, err := r.Activity(context.Background(), "TAL-42")
+	if err != nil {
+		t.Fatalf("Activity error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("Activity len = %d, want 2; got %+v", len(got), got)
+	}
+	if got[0].Text != "apply started" {
+		t.Errorf("Activity[0].Text = %q, want %q", got[0].Text, "apply started")
+	}
+}
+
+// TestActivityFallbackWhenRunsAbsent verifies that Activity() degrades to an
+// empty non-nil slice when the runs binary is absent or fails — no error returned.
+func TestActivityFallbackWhenRunsAbsent(t *testing.T) {
+	r := New("/repo", "develop")
+	r.runsRun = func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+		return nil, fmt.Errorf("exec: runs: executable file not found in $PATH")
+	}
+	got, err := r.Activity(context.Background(), "TAL-42")
+	if err != nil {
+		t.Errorf("Activity should not return error on runs absence, got: %v", err)
+	}
+	if got == nil {
+		t.Error("Activity fallback must return non-nil empty slice, got nil")
+	}
+	if len(got) != 0 {
+		t.Errorf("Activity fallback len = %d, want 0", len(got))
+	}
+}
+
+// TestActivityFallbackOnMalformedJSON verifies degradation when runs outputs
+// malformed JSON (e.g. partial write / corrupt file).
+func TestActivityFallbackOnMalformedJSON(t *testing.T) {
+	r := New("/repo", "develop")
+	r.runsRun = func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+		return []byte("not-json{{{"), nil
+	}
+	got, err := r.Activity(context.Background(), "TAL-42")
+	if err != nil {
+		t.Errorf("Activity must not return error on bad JSON, got: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("Activity on bad JSON len = %d, want 0", len(got))
+	}
+}
+
+// TestRunsJudgmentReturnsParsedOutput verifies that RunsJudgment() deserializes
+// the JudgmentReview JSON emitted by `runs judgment --jira-key K --json`.
+func TestRunsJudgmentReturnsParsedOutput(t *testing.T) {
+	rev := domain.JudgmentReview{
+		JiraKey: "TAL-42",
+		Gate:    "HG5",
+		Judges: []domain.Judge{
+			{ID: "cronos", Verdict: "APPROVED", Note: ""},
+		},
+		FixAgent: "idle",
+		Verdict:  "agree",
+		Pending:  false,
+	}
+	data, err := json.Marshal(rev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := New("/repo", "develop")
+	r.runsRun = func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+		return data, nil
+	}
+	got, err := r.RunsJudgment(context.Background(), "TAL-42")
+	if err != nil {
+		t.Fatalf("RunsJudgment error: %v", err)
+	}
+	if got.JiraKey != "TAL-42" {
+		t.Errorf("RunsJudgment.JiraKey = %q, want TAL-42", got.JiraKey)
+	}
+	if got.Pending {
+		t.Errorf("RunsJudgment.Pending = true, want false (real data present)")
+	}
+	if len(got.Judges) != 1 || got.Judges[0].ID != "cronos" {
+		t.Errorf("RunsJudgment.Judges = %+v, want [{cronos APPROVED}]", got.Judges)
+	}
+}
+
+// TestRunsJudgmentFallbackWhenRunsAbsent verifies fail-soft: returns Pending
+// review (not an error) when runs binary is absent.
+func TestRunsJudgmentFallbackWhenRunsAbsent(t *testing.T) {
+	r := New("/repo", "develop")
+	r.runsRun = func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+		return nil, fmt.Errorf("exec: runs: not found")
+	}
+	got, err := r.RunsJudgment(context.Background(), "TAL-42")
+	if err != nil {
+		t.Errorf("RunsJudgment must not return error on runs absence, got: %v", err)
+	}
+	if !got.Pending {
+		t.Errorf("RunsJudgment fallback Pending = false, want true")
+	}
+}
+
+// TestRunsDoDReturnsParsedOutput verifies that RunsDoD() deserializes the
+// []DoDItem JSON emitted by `runs dod --jira-key K --json`.
+func TestRunsDoDReturnsParsedOutput(t *testing.T) {
+	items := []domain.DoDItem{
+		{Label: "PR linked", State: "done", Kind: "pr"},
+		{Label: "CI green", State: "pending", Kind: "ci"},
+	}
+	data, err := json.Marshal(items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := New("/repo", "develop")
+	r.runsRun = func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+		return data, nil
+	}
+	got, err := r.RunsDoD(context.Background(), "TAL-42")
+	if err != nil {
+		t.Fatalf("RunsDoD error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("RunsDoD len = %d, want 2; got %+v", len(got), got)
+	}
+	if got[0].Label != "PR linked" || got[0].State != "done" {
+		t.Errorf("RunsDoD[0] = %+v, want {PR linked done pr}", got[0])
+	}
+}
+
+// TestRunsDoDFallbackWhenRunsAbsent verifies degradation when runs binary is absent.
+func TestRunsDoDFallbackWhenRunsAbsent(t *testing.T) {
+	r := New("/repo", "develop")
+	r.runsRun = func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+		return nil, fmt.Errorf("exec: runs: not found")
+	}
+	got, err := r.RunsDoD(context.Background(), "TAL-42")
+	if err != nil {
+		t.Errorf("RunsDoD must not return error on runs absence, got: %v", err)
+	}
+	if got == nil {
+		t.Error("RunsDoD fallback must return non-nil empty slice, got nil")
+	}
+	if len(got) != 0 {
+		t.Errorf("RunsDoD fallback len = %d, want 0", len(got))
+	}
+}
+
 // TestMergeTreeConflictConflictPair checks mergeTreeConflict returns clean=false
 // and lists the conflicting file when both branches edit the same line.
 func TestMergeTreeConflictConflictPair(t *testing.T) {

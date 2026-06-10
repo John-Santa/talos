@@ -35,10 +35,11 @@ func execCh(ctx context.Context, name string, args ...string) ([]byte, error) {
 }
 
 type Reader struct {
-	root  string
-	base  string
-	run   gitRunner
-	chRun chRunner
+	root    string
+	base    string
+	run     gitRunner
+	chRun   chRunner
+	runsRun chRunner // same signature as chRun; injected for tests
 }
 
 // New builds a Reader for the given repo root (base defaults to "develop").
@@ -46,7 +47,7 @@ func New(root, base string) *Reader {
 	if base == "" {
 		base = "develop"
 	}
-	return &Reader{root: root, base: base, run: execGit, chRun: execCh}
+	return &Reader{root: root, base: base, run: execGit, chRun: execCh, runsRun: execCh}
 }
 
 // NewAutodetect resolves the repo root from the current working directory.
@@ -345,6 +346,74 @@ func (r *Reader) Labels(ctx context.Context, branch string) (domain.ChLabels, er
 		return domain.ChLabels{}, nil
 	}
 	return cl, nil
+}
+
+// Activity calls `runs timeline --jira-key <k> --json` with a short timeout and
+// returns the parsed result. It degrades gracefully: if the runs binary is
+// absent, exits non-zero, or returns malformed JSON, the method returns an empty
+// non-nil slice without an error — identical behaviour to Labels().
+func (r *Reader) Activity(ctx context.Context, jiraKey string) ([]domain.ActivityEntry, error) {
+	tctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	out, err := r.runsRun(tctx, "runs", "timeline", "--jira-key", jiraKey, "--json")
+	if err != nil {
+		return []domain.ActivityEntry{}, nil
+	}
+	var entries []domain.ActivityEntry
+	if err := json.Unmarshal(out, &entries); err != nil {
+		return []domain.ActivityEntry{}, nil
+	}
+	if entries == nil {
+		entries = []domain.ActivityEntry{}
+	}
+	return entries, nil
+}
+
+// RunsJudgment calls `runs judgment --jira-key <k> --json` with a short timeout
+// and returns the parsed JudgmentReview. It degrades gracefully: if the runs
+// binary is absent, exits non-zero, or returns malformed JSON, the method
+// returns a Pending review without an error — identical behaviour to Labels().
+func (r *Reader) RunsJudgment(ctx context.Context, jiraKey string) (domain.JudgmentReview, error) {
+	pending := domain.JudgmentReview{
+		JiraKey:  jiraKey,
+		Gate:     "HG5",
+		Judges:   []domain.Judge{},
+		FixAgent: "idle",
+		Verdict:  "pending",
+		Pending:  true,
+	}
+	tctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	out, err := r.runsRun(tctx, "runs", "judgment", "--jira-key", jiraKey, "--json")
+	if err != nil {
+		return pending, nil
+	}
+	var rev domain.JudgmentReview
+	if err := json.Unmarshal(out, &rev); err != nil {
+		return pending, nil
+	}
+	return rev, nil
+}
+
+// RunsDoD calls `runs dod --jira-key <k> --json` with a short timeout and
+// returns the parsed checklist. It degrades gracefully: if the runs binary is
+// absent, exits non-zero, or returns malformed JSON, the method returns an empty
+// non-nil slice without an error — identical behaviour to Labels().
+func (r *Reader) RunsDoD(ctx context.Context, jiraKey string) ([]domain.DoDItem, error) {
+	tctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	out, err := r.runsRun(tctx, "runs", "dod", "--jira-key", jiraKey, "--json")
+	if err != nil {
+		return []domain.DoDItem{}, nil
+	}
+	var items []domain.DoDItem
+	if err := json.Unmarshal(out, &items); err != nil {
+		return []domain.DoDItem{}, nil
+	}
+	if items == nil {
+		items = []domain.DoDItem{}
+	}
+	return items, nil
 }
 
 // Merge merges the worktree's branch into base, guarded by a non-destructive

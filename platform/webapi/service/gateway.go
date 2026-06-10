@@ -44,8 +44,9 @@ func (g *Gateway) Agents(_ context.Context) []domain.Agent {
 	return domain.AllAgents()
 }
 
-// Agent returns an agent's detail. DoD is populated via `ch labels` (best-effort);
-// activity has no offline source and comes back empty; the worktree (if any) is real.
+// Agent returns an agent's detail. Activity is populated via `runs timeline`
+// (best-effort); DoD is populated via `runs dod` when runs has data, falling
+// back to `ch labels` (best-effort); the worktree (if any) is real.
 func (g *Gateway) Agent(ctx context.Context, figura string) (domain.AgentDetail, error) {
 	figura = domain.NormalizeFigura(figura)
 	agent, ok := domain.AgentByID(figura)
@@ -64,10 +65,22 @@ func (g *Gateway) Agent(ctx context.Context, figura string) (domain.AgentDetail,
 			if domain.NormalizeFigura(e.Figura) == figura {
 				w := domain.MapWorktree(e, own, plan)
 				detail.Worktree = &w
-				// Best-effort: populate DoD from `ch labels`. Empty on failure.
-				if cl, err := g.reader.Labels(ctx, e.Branch); err == nil {
+
+				jiraKey := domain.ParseJiraKey(e.Branch)
+
+				// Activity: populated from `runs timeline` (best-effort).
+				// Ensure Activity is always a non-nil slice (front expects []).
+				if acts, err := g.reader.Activity(ctx, jiraKey); err == nil && acts != nil {
+					detail.Activity = acts
+				}
+
+				// DoD: prefer `runs dod` (historical source); fall back to `ch labels` (live state).
+				if runsItems, err := g.reader.RunsDoD(ctx, jiraKey); err == nil && len(runsItems) > 0 {
+					detail.DoD = runsItems
+				} else if cl, err := g.reader.Labels(ctx, e.Branch); err == nil {
 					detail.DoD = domain.MapDoD(cl)
 				}
+
 				break
 			}
 		}
@@ -75,21 +88,24 @@ func (g *Gateway) Agent(ctx context.Context, figura string) (domain.AgentDetail,
 	return detail, nil
 }
 
-// Judgment attempts `ch judgment --json` (best-effort, timeout via Labels pattern).
-// When ch is unavailable or returns no data, returns an explicit Pending state so
-// the front never shows a fabricated positive verdict.
+// Judgment calls `runs judgment --jira-key <k> --json` (best-effort via runsRun).
+// When runs has a recorded JudgmentReview and Pending is false, that real verdict
+// is returned. In all other cases (runs absent, error, or no events) the method
+// degrades to an explicit Pending state so the front never shows a fabricated verdict.
 func (g *Gateway) Judgment(ctx context.Context, jiraKey string) (domain.JudgmentReview, error) {
-	// Try to get judgment via ch labels channel (reuse Labels port pattern).
-	// ch judgment is not yet wired through a dedicated port method — we degrade
-	// to pending. A future PR can add Judgment() to PlatformReader once ch is available.
-	return domain.JudgmentReview{
+	pending := domain.JudgmentReview{
 		JiraKey:  jiraKey,
 		Gate:     "HG5",
 		Judges:   []domain.Judge{},
 		FixAgent: "idle",
 		Verdict:  "pending",
 		Pending:  true,
-	}, nil
+	}
+	rev, err := g.reader.RunsJudgment(ctx, jiraKey)
+	if err != nil || rev.Pending {
+		return pending, nil
+	}
+	return rev, nil
 }
 
 // CreateWorktree spins up an isolated worktree for a figura.

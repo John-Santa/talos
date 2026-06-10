@@ -19,6 +19,15 @@ type PlatformReader interface {
 	// Labels calls `ch labels --branch <branch> --json` (best-effort).
 	// If the ch binary is absent or fails, returns an empty ChLabels without error.
 	Labels(ctx context.Context, branch string) (domain.ChLabels, error)
+	// Activity calls `runs timeline --jira-key <k> --json` (best-effort).
+	// Returns an empty non-nil slice when the runs binary is absent or fails.
+	Activity(ctx context.Context, jiraKey string) ([]domain.ActivityEntry, error)
+	// RunsJudgment calls `runs judgment --jira-key <k> --json` (best-effort).
+	// Returns a Pending review when the runs binary is absent, fails, or has no data.
+	RunsJudgment(ctx context.Context, jiraKey string) (domain.JudgmentReview, error)
+	// RunsDoD calls `runs dod --jira-key <k> --json` (best-effort).
+	// Returns an empty non-nil slice when the runs binary is absent or fails.
+	RunsDoD(ctx context.Context, jiraKey string) ([]domain.DoDItem, error)
 }
 
 // PlatformWriter performs worktree write actions (native git, no binaries).
