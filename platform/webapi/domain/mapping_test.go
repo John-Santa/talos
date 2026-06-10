@@ -54,14 +54,23 @@ func TestBuildSnapshot(t *testing.T) {
 	if snap.Overlap.Verdict != "OK" {
 		t.Errorf("verdict = %q, want OK", snap.Overlap.Verdict)
 	}
-	if snap.Slots.Used != 2 || snap.Slots.Total != 7 {
-		t.Errorf("slots = %+v, want {2 7}", snap.Slots)
+	// Slots.Total must derive from devRoster length, not be hardcoded.
+	if snap.Slots.Used != 2 || snap.Slots.Total != len(devRoster) {
+		t.Errorf("slots = %+v, want {Used:2, Total:%d}", snap.Slots, len(devRoster))
 	}
 	if len(snap.IdleAgents) != 5 {
 		t.Errorf("idleAgents = %v, want 5 (devRoster minus hermes,iris)", snap.IdleAgents)
 	}
 	if snap.Gate.ID != "HG3" || snap.Gate.State != "pending" {
 		t.Errorf("gate = %+v, want HG3 pending", snap.Gate)
+	}
+}
+
+// TestSlotsTotal verifies BuildSnapshot derives Total from devRoster, not a literal 7.
+func TestSlotsTotal(t *testing.T) {
+	snap := BuildSnapshot(nil, MoPlan{}, OvScan{}, nil)
+	if snap.Slots.Total != len(devRoster) {
+		t.Errorf("Slots.Total = %d, want %d (len(devRoster))", snap.Slots.Total, len(devRoster))
 	}
 }
 

@@ -177,25 +177,45 @@ func (r *Reader) aheadCount(ctx context.Context, branch string) int {
 	return n
 }
 
-// MergePlan derives the merge order from the worktrees (ahead via git rev-list;
-// "ready" = ahead of base). Conflict prediction is not computed offline.
+// MergePlan derives the merge order from the worktrees (ahead via git rev-list).
+// For each branch with commits ahead, mergeTreeConflict is called to compute
+// a real conflict prediction. ConflictRate = C/N where N = steps with ahead>0,
+// C = steps with conflicts. N=0 → rate 0.
 func (r *Reader) MergePlan(ctx context.Context) (domain.MoPlan, error) {
 	wts, err := r.Worktrees(ctx)
 	if err != nil {
 		return domain.MoPlan{}, err
 	}
 	steps := make([]domain.MoPlanStep, 0, len(wts))
+	candidates, conflicting := 0, 0
 	for i, w := range wts {
 		ahead := r.aheadCount(ctx, w.Branch)
+		var conflictFiles []string
+		predictedClean := false
+		if ahead > 0 {
+			candidates++
+			var clean bool
+			conflictFiles, clean = r.mergeTreeConflict(ctx, r.base, w.Branch)
+			if clean {
+				predictedClean = true
+			} else {
+				conflicting++
+			}
+		}
 		steps = append(steps, domain.MoPlanStep{
 			Position:       i + 1,
 			Branch:         w.Branch,
 			Figura:         w.Figura,
 			CommitsAhead:   ahead,
-			PredictedClean: ahead > 0,
+			PredictedClean: predictedClean,
+			ConflictFiles:  conflictFiles,
 		})
 	}
-	return domain.MoPlan{BaseBranch: r.base, ConflictRate: 0, Threshold: 0.15, Steps: steps}, nil
+	rate := 0.0
+	if candidates > 0 {
+		rate = float64(conflicting) / float64(candidates)
+	}
+	return domain.MoPlan{BaseBranch: r.base, ConflictRate: rate, Threshold: 0.15, Steps: steps}, nil
 }
 
 // Overlap derives collisions: two active worktrees collide when they own the
