@@ -509,3 +509,36 @@ func TestUpdate_JThenK_CursorComesBack_OffsetFollows(t *testing.T) {
 		t.Errorf("cursor should be back at 0, got %d", m.Cursor)
 	}
 }
+
+// ─── RepoLabel field ─────────────────────────────────────────────────────────
+
+func TestNew_RepoLabel_DefaultEmpty(t *testing.T) {
+	m := newModel(nil)
+	if m.RepoLabel != "" {
+		t.Errorf("RepoLabel: got %q, want empty string by default", m.RepoLabel)
+	}
+}
+
+func TestWithRepoLabel_SetsField(t *testing.T) {
+	m := newModel(nil)
+	m2 := m.WithRepoLabel("John-Santa/talos")
+	if m2.RepoLabel != "John-Santa/talos" {
+		t.Errorf("RepoLabel: got %q, want %q", m2.RepoLabel, "John-Santa/talos")
+	}
+}
+
+func TestWithRepoLabel_DoesNotMutateOriginal(t *testing.T) {
+	m := newModel(nil)
+	_ = m.WithRepoLabel("John-Santa/talos")
+	if m.RepoLabel != "" {
+		t.Errorf("original RepoLabel should still be empty, got %q", m.RepoLabel)
+	}
+}
+
+func TestWithRepoLabel_EmptyValue(t *testing.T) {
+	m := newModel(nil)
+	m2 := m.WithRepoLabel("")
+	if m2.RepoLabel != "" {
+		t.Errorf("RepoLabel with empty arg: got %q, want %q", m2.RepoLabel, "")
+	}
+}
