@@ -7,18 +7,22 @@
 
 | `module:*` | Dueño (`agent:*`) | Dominio | Estado |
 |---|---|---|---|
-| `module:backend-ctx1` | ATLAS | backend — bounded context #1 (nombre real ← `explore`) | slot |
-| `module:backend-ctx2` | HEPHAESTUS | backend — bounded context #2 (nombre real ← `explore`) | slot |
-| `module:backend-ctx3` | CRONOS | backend — bounded context #3 (nombre real ← `explore`) | slot |
+| `module:workspaces` | ATLAS | Proyectos orquestables (binding repo↔Jira) + vault local de credenciales. Local por máquina, sin multi-usuario. | definido |
+| `module:orchestration` | HEPHAESTUS | Motor de despacho: issue → worktree → CLIs (`wt`/`mo`/`ov`/`ch`) → loop de evidencia. API que la consola consume. | definido |
+| `module:runs` | CRONOS | Runs & observabilidad: historial de corridas, actividad de agentes, resultados de judgment, métricas (conflict rate, DoD). | definido |
 | `module:frontend` | IRIS | UI / interacción (consola Go ahora; web a futuro) | active |
 | `module:data` | GAIA | esquema / persistencia / migraciones | slot |
 | `module:qa` | THEMIS | tests / harness / métricas | slot |
 | `module:devops` | HERMES | CI / release / entornos | active |
 | `module:jira-loop` | HERMES | Jira lifecycle / evidence plumbing | active |
 
-> Los `backend-ctxN` son **slots**: la fase `explore` les asigna el nombre del bounded context real
-> (auth, billing, catálogo…). Si no salen 3 contextos backend genuinamente independientes,
-> **se serializan dos de ellos** — no se fuerzan 3 worktrees backend en paralelo.
+> **Dominios de plataforma, no de negocio.** Talos es una consola de orquestación opensource que
+> corre local en la máquina de cada usuario; cada instalación es un operador con sus propios
+> proyectos (sin servidor central, sin multi-usuario, sin whitelist). Por eso los tres contextos
+> backend son `workspaces` (qué se orquesta), `orchestration` (cómo se despacha) y `runs` (qué pasó),
+> no auth/billing/catálogo. Son genuinamente independientes → admiten 3 worktrees backend en paralelo.
+> Nota de persistencia: `workspaces` y `runs` probablemente requieran un store local (p.ej. SQLite)
+> en vez del git-filesystem actual — decisión de GAIA (`module:data`) al construirlos.
 
 ## Reglas
 
