@@ -21,7 +21,7 @@ func testItem() dispatch.WorkItem {
 }
 
 func newDispatcher(wt *mock.WorktreeManagerMock, ov *mock.OverlapCheckerMock, ev *mock.EvidenceRunnerMock, mo *mock.MergeCoordinatorMock, rb *mock.RollbackCoordinatorMock) *service.Dispatcher {
-	return service.NewDispatcher(wt, ov, ev, mo, rb, service.DefaultConfig())
+	return service.NewDispatcher(wt, ov, ev, mo, rb, nil, service.DefaultConfig())
 }
 
 // TestDispatch_HappyPath_Propose verifies the full propose sequence: ov check → wt ensure → evidence run → no merge gate.
@@ -191,7 +191,7 @@ func TestDispatch_ConfirmMerge_Executes(t *testing.T) {
 
 	cfg := service.DefaultConfig()
 	cfg.ConfirmMerge = true
-	d := service.NewDispatcher(wt, ov, ev, mo, rb, cfg)
+	d := service.NewDispatcher(wt, ov, ev, mo, rb, nil, cfg)
 
 	_, err := d.Dispatch(context.Background(), testItem(), dispatch.PhaseVerify, port.EvidenceArgs{})
 	if err != nil {

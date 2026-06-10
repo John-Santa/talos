@@ -171,3 +171,29 @@ func (m *RollbackCoordinatorMock) Recipe11(_ context.Context, jiraKey, figura, r
 	m.record("Recipe11", jiraKey, figura, reason)
 	return m.Err
 }
+
+// ---- RunRecorderMock ----
+
+// RunRecorderMock is a test double for port.RunRecorder.
+type RunRecorderMock struct {
+	callRecorder
+	// Err, if non-nil, is returned by all methods (used to test fail-soft behavior).
+	Err error
+}
+
+var _ port.RunRecorder = (*RunRecorderMock)(nil)
+
+func (m *RunRecorderMock) RecordDispatch(_ context.Context, item dispatch.WorkItem, phase, status string) error {
+	m.record("RecordDispatch", item, phase, status)
+	return m.Err
+}
+
+func (m *RunRecorderMock) RecordActivity(_ context.Context, jiraKey, agent, text string) error {
+	m.record("RecordActivity", jiraKey, agent, text)
+	return m.Err
+}
+
+func (m *RunRecorderMock) RecordMetric(_ context.Context, jiraKey, name string, value float64) error {
+	m.record("RecordMetric", jiraKey, name, value)
+	return m.Err
+}

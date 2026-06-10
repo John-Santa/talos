@@ -27,6 +27,7 @@ import (
 	"github.com/John-Santa/talos/platform/orchestration/adapter/evidencecli"
 	"github.com/John-Santa/talos/platform/orchestration/adapter/mocli"
 	"github.com/John-Santa/talos/platform/orchestration/adapter/ovcli"
+	"github.com/John-Santa/talos/platform/orchestration/adapter/runscli"
 	"github.com/John-Santa/talos/platform/orchestration/adapter/wtcli"
 	"github.com/John-Santa/talos/platform/orchestration/domain/dispatch"
 	"github.com/John-Santa/talos/platform/orchestration/internal/runner"
@@ -74,6 +75,7 @@ func cmdDispatch(args []string) error {
 	wtBin := fs.String("wt-bin", "wt", "Path or name of the wt binary")
 	moBin := fs.String("mo-bin", "mo", "Path or name of the mo binary")
 	evidenceBin := fs.String("evidence-bin", "evidence", "Path or name of the evidence binary")
+	runsBin := fs.String("runs-bin", "runs", "Path or name of the runs binary (empty = disable recorder)")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -101,10 +103,16 @@ func cmdDispatch(args []string) error {
 	moCoord := mocli.NewCoordinator(*moBin, r)
 	rbCoord := evidencecli.NewRollbacker(*evidenceBin, *wtBin, r)
 
+	// RunRecorder: wire real adapter; in --dry-run use nil (no-op).
+	var rec port.RunRecorder
+	if !*dryRun && *runsBin != "" {
+		rec = runscli.NewRecorder(*runsBin, r)
+	}
+
 	cfg := service.DefaultConfig()
 	cfg.ConfirmMerge = *confirmMerge
 
-	d := service.NewDispatcher(wtMgr, ovChecker, evRunner, moCoord, rbCoord, cfg)
+	d := service.NewDispatcher(wtMgr, ovChecker, evRunner, moCoord, rbCoord, rec, cfg)
 
 	item := dispatch.WorkItem{
 		JiraKey: *jiraKey,

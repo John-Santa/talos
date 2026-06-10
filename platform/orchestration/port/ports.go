@@ -64,3 +64,17 @@ type RollbackCoordinator interface {
 	// (2) evidence comment with reason, (3) wt teardown --force <figura>.
 	Recipe11(ctx context.Context, jiraKey, figura, reason string) error
 }
+
+// RunRecorder registers observability events into the runs module.
+// All methods are fail-soft: an error MUST NOT abort or alter the dispatch result.
+type RunRecorder interface {
+	// RecordDispatch records a lifecycle event for a dispatch run.
+	// status is one of: "running", "done", "failed".
+	RecordDispatch(ctx context.Context, item dispatch.WorkItem, phase string, status string) error
+
+	// RecordActivity appends a free-text activity entry for a jiraKey.
+	RecordActivity(ctx context.Context, jiraKey, agent, text string) error
+
+	// RecordMetric appends a numeric metric (e.g. conflict_rate) for a jiraKey.
+	RecordMetric(ctx context.Context, jiraKey, name string, value float64) error
+}
