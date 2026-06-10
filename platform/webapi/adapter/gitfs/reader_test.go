@@ -75,7 +75,7 @@ func TestTeardownRemovesByPath(t *testing.T) {
 
 func TestMergeRunsWhenClean(t *testing.T) {
 	fr := &fakeRunner{outputs: map[string]string{"worktree list --porcelain": twoWorktrees}}
-	if err := newFakeReader(fr).Merge(context.Background(), "TAL-15"); err != nil {
+	if err := newFakeReader(fr).Merge(context.Background(), "hermes", "TAL-15"); err != nil {
 		t.Fatal(err)
 	}
 	if !fr.called("merge --no-edit agent/hermes/TAL-15") {
@@ -86,13 +86,45 @@ func TestMergeRunsWhenClean(t *testing.T) {
 func TestMergeAbortsOnConflict(t *testing.T) {
 	fr := &fakeRunner{
 		outputs: map[string]string{"worktree list --porcelain": twoWorktrees},
-		errs:    map[string]bool{"merge-tree --write-tree develop agent/hermes/TAL-15": true},
+		errs:    map[string]bool{"merge-tree --write-tree --name-only develop agent/hermes/TAL-15": true},
 	}
-	err := newFakeReader(fr).Merge(context.Background(), "TAL-15")
+	err := newFakeReader(fr).Merge(context.Background(), "hermes", "TAL-15")
 	if err == nil {
 		t.Fatal("expected a conflict error")
 	}
 	if fr.called("merge --no-edit") {
 		t.Errorf("merge must NOT run when merge-tree reports a conflict; calls: %v", fr.calls)
 	}
+}
+
+// TestMergeExactFiguraMatch verifies that two worktrees sharing a jiraKey are
+// distinguished by figura: only the exact agent/<figura>/<jiraKey> branch merges.
+func TestMergeExactFiguraMatch(t *testing.T) {
+	twoFiguras := "worktree /repo\nHEAD aaaaaaa\nbranch refs/heads/develop\n\n" +
+		"worktree /repo/talos.wt/agent-iris\nHEAD bbbbbbb\nbranch refs/heads/agent/iris/TAL-42\n\n" +
+		"worktree /repo/talos.wt/agent-atlas\nHEAD ccccccc\nbranch refs/heads/agent/atlas/TAL-42\n"
+
+	t.Run("correct figura merges", func(t *testing.T) {
+		fr := &fakeRunner{outputs: map[string]string{"worktree list --porcelain": twoFiguras}}
+		if err := newFakeReader(fr).Merge(context.Background(), "iris", "TAL-42"); err != nil {
+			t.Fatal(err)
+		}
+		if !fr.called("merge --no-edit agent/iris/TAL-42") {
+			t.Errorf("expected iris branch to merge; calls: %v", fr.calls)
+		}
+		if fr.called("agent/atlas/TAL-42") {
+			t.Errorf("atlas branch must NOT be touched; calls: %v", fr.calls)
+		}
+	})
+
+	t.Run("wrong figura returns error", func(t *testing.T) {
+		fr := &fakeRunner{outputs: map[string]string{"worktree list --porcelain": twoFiguras}}
+		err := newFakeReader(fr).Merge(context.Background(), "cronos", "TAL-42")
+		if err == nil {
+			t.Fatal("expected error for non-matching figura")
+		}
+		if fr.called("merge --no-edit") {
+			t.Errorf("merge must NOT run; calls: %v", fr.calls)
+		}
+	})
 }

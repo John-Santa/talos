@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,7 +12,12 @@ import (
 	"github.com/John-Santa/talos/platform/webapi/domain"
 )
 
-type fakeSvc struct{ notReady bool }
+// erringSvc overrides specific methods to return errors.
+type fakeSvc struct {
+	notReady       bool
+	createErr      error
+	mergeErr       error
+}
 
 func (s fakeSvc) Ready(context.Context) error {
 	if s.notReady {
@@ -38,9 +44,17 @@ func (fakeSvc) Judgment(_ context.Context, jiraKey string) (domain.JudgmentRevie
 	return domain.JudgmentReview{JiraKey: jiraKey, Gate: "HG5", Verdict: "agree"}, nil
 }
 
-func (fakeSvc) CreateWorktree(context.Context, string, string) error { return nil }
-func (fakeSvc) TeardownWorktree(context.Context, string) error       { return nil }
-func (fakeSvc) MergeWorktree(context.Context, string) error          { return nil }
+func (s fakeSvc) CreateWorktree(_ context.Context, figura, jiraKey string) error {
+	_ = figura
+	_ = jiraKey
+	return s.createErr
+}
+func (fakeSvc) TeardownWorktree(context.Context, string) error { return nil }
+func (s fakeSvc) MergeWorktree(_ context.Context, figura, jiraKey string) error {
+	_ = figura
+	_ = jiraKey
+	return s.mergeErr
+}
 
 func do(h http.Handler, method, path string) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
@@ -147,9 +161,64 @@ func TestTeardownRoute(t *testing.T) {
 	}
 }
 
-func TestMergeRoute(t *testing.T) {
-	rec := do(New(fakeSvc{}, "*", nil), http.MethodPost, "/api/merge/TAL-15")
-	if rec.Code != http.StatusOK {
-		t.Errorf("merge status = %d, want 200", rec.Code)
+// --- PR2 handler tests -------------------------------------------------------
+
+func TestCreateWorktreeUnknownFigura400(t *testing.T) {
+	svc := fakeSvc{createErr: domain.ErrUnknownFigura}
+	rec := doBody(New(svc, "*", nil), http.MethodPost, "/api/worktrees",
+		`{"figura":"bogus","jiraKey":"TAL-42"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("unknown figura status = %d, want 400", rec.Code)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["error"] == "" {
+		t.Errorf("expected error field in body, got %v", body)
+	}
+}
+
+func TestCreateWorktreeServiceError502(t *testing.T) {
+	svc := fakeSvc{createErr: errors.New("git broken")}
+	rec := doBody(New(svc, "*", nil), http.MethodPost, "/api/worktrees",
+		`{"figura":"iris","jiraKey":"TAL-42"}`)
+	if rec.Code != http.StatusBadGateway {
+		t.Errorf("service error status = %d, want 502", rec.Code)
+	}
+}
+
+func TestMergeRouteWithFiguraBody(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		mergeErr   error
+		wantStatus int
+	}{
+		{
+			name:       "valid merge with figura body → 200",
+			body:       `{"figura":"iris"}`,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "missing figura in body → 400",
+			body:       `{}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "service error → 502",
+			body:       `{"figura":"iris"}`,
+			mergeErr:   errors.New("no worktree"),
+			wantStatus: http.StatusBadGateway,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := fakeSvc{mergeErr: tt.mergeErr}
+			rec := doBody(New(svc, "*", nil), http.MethodPost, "/api/merge/TAL-15", tt.body)
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d (body: %s)", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+		})
 	}
 }

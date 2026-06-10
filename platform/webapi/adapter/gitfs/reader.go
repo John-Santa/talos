@@ -271,28 +271,56 @@ func (r *Reader) TeardownWorktree(ctx context.Context, figura string) error {
 	return fmt.Errorf("no worktree for figura %q", figura)
 }
 
+// mergeTreeConflict runs a non-destructive git merge-tree check for branch
+// against r.base. Returns conflict file paths (if any) and whether the merge
+// would be clean. Uses --name-only (git ≥ 2.38) to list conflicting files.
+func (r *Reader) mergeTreeConflict(ctx context.Context, base, branch string) (conflictFiles []string, clean bool) {
+	out, err := r.git(ctx, "merge-tree", "--write-tree", "--name-only", base, branch)
+	if err != nil {
+		// Non-zero exit = conflicts exist; parse stdout for file names.
+		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+		// First line is the OID of the tree; skip it. Remaining non-empty lines
+		// before the informational messages block are conflicting file paths.
+		files := make([]string, 0)
+		for i, line := range lines {
+			if i == 0 {
+				continue // skip tree OID
+			}
+			line = strings.TrimSpace(line)
+			if line == "" {
+				break // blank line separates sections
+			}
+			files = append(files, line)
+		}
+		return files, false
+	}
+	return nil, true
+}
+
 // Merge merges the worktree's branch into base, guarded by a non-destructive
-// conflict check (git merge-tree). Aborts without touching anything on conflict.
-func (r *Reader) Merge(ctx context.Context, jiraKey string) error {
+// conflict check (git merge-tree). The branch is matched exactly as
+// agent/<figura>/<jiraKey> to avoid collisions between figuras sharing a jiraKey.
+func (r *Reader) Merge(ctx context.Context, figura, jiraKey string) error {
 	raws, err := r.rawWorktrees(ctx)
 	if err != nil {
 		return err
 	}
+	target := fmt.Sprintf("agent/%s/%s", domain.NormalizeFigura(figura), jiraKey)
 	branch := ""
 	developPath := ""
 	for _, w := range raws {
 		if w.Branch == r.base {
 			developPath = w.Path
 		}
-		if _, ok := figuraFromBranch(w.Branch); ok && strings.HasSuffix(w.Branch, "/"+jiraKey) {
+		if w.Branch == target {
 			branch = w.Branch
 		}
 	}
 	if branch == "" {
-		return fmt.Errorf("no worktree for %q", jiraKey)
+		return fmt.Errorf("no worktree for %q", target)
 	}
-	// Non-destructive conflict check: merge-tree exits non-zero on conflicts.
-	if _, err := r.git(ctx, "merge-tree", "--write-tree", r.base, branch); err != nil {
+	// Non-destructive conflict check reusing shared helper.
+	if _, clean := r.mergeTreeConflict(ctx, r.base, branch); !clean {
 		return fmt.Errorf("merge of %s into %s would conflict — aborted", branch, r.base)
 	}
 	if developPath == "" {

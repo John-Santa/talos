@@ -22,5 +22,5 @@ type PlatformReader interface {
 type PlatformWriter interface {
 	CreateWorktree(ctx context.Context, figura, jiraKey string) error
 	TeardownWorktree(ctx context.Context, figura string) error
-	Merge(ctx context.Context, jiraKey string) error
+	Merge(ctx context.Context, figura, jiraKey string) error
 }
