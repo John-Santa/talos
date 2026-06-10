@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -47,6 +48,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.helpModel.ShowAll = m.HelpShowAll
 		case "x":
 			m = m.openTeardownModal()
+		case "n":
+			m, cmd := m.openCreateModal()
+			return m, cmd
 		}
 		return m, nil
 
@@ -88,9 +92,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // ─── Modal routing ────────────────────────────────────────────────────────────
 
-// updateModal handles key events while the confirmation modal is active.
-// y/enter = confirm; n/esc = cancel; all other keys are swallowed.
+// updateModal dispatches key events to the right modal handler based on ModalMode.
 func (m Model) updateModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.ModalMode == ModalModeCreate {
+		return m.updateCreateModal(msg)
+	}
+	return m.updateConfirmModal(msg)
+}
+
+// updateConfirmModal handles key events for the yes/no confirmation dialog.
+// y/enter = confirm; n/esc = cancel; all other keys are swallowed.
+func (m Model) updateConfirmModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEnter:
 		return m.confirmModal()
@@ -122,6 +134,93 @@ func (m Model) confirmModal() (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// ─── Create-modal routing ─────────────────────────────────────────────────────
+
+// reValidFigura matches a figura: one or more lowercase ASCII letters only.
+var reValidFigura = regexp.MustCompile(`^[a-z]+$`)
+
+// reValidJiraKey matches a Jira key in the TAL-NNN format.
+var reValidJiraKey = regexp.MustCompile(`^TAL-[0-9]+$`)
+
+// isCreateInputValid returns true when both inputs pass their validation rules.
+func (m Model) isCreateInputValid() bool {
+	return reValidFigura.MatchString(m.CreateFiguraInput.Value()) &&
+		reValidJiraKey.MatchString(m.CreateJiraKeyInput.Value())
+}
+
+// updateCreateModal handles key events while the create-worktree input modal is open.
+// Tab advances focus between the two inputs.
+// Enter attempts to confirm (blocked when input is invalid).
+// Esc cancels.
+// All other keys are forwarded to the focused input.
+func (m Model) updateCreateModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.ModalActive = false
+		m.CreateFiguraInput.Blur()
+		m.CreateJiraKeyInput.Blur()
+		return m, nil
+
+	case tea.KeyTab:
+		// Cycle focus: figura → jiraKey → figura.
+		if m.CreateFiguraInput.Focused() {
+			m.CreateFiguraInput.Blur()
+			cmd := m.CreateJiraKeyInput.Focus()
+			return m, cmd
+		}
+		m.CreateJiraKeyInput.Blur()
+		cmd := m.CreateFiguraInput.Focus()
+		return m, cmd
+
+	case tea.KeyEnter:
+		if !m.isCreateInputValid() {
+			// Block confirm — invalid input; keep modal open, no cmd.
+			return m, nil
+		}
+		return m.confirmCreateModal()
+	}
+
+	// Forward all other keys to the focused input.
+	var cmd tea.Cmd
+	if m.CreateFiguraInput.Focused() {
+		m.CreateFiguraInput, cmd = m.CreateFiguraInput.Update(msg)
+	} else {
+		m.CreateJiraKeyInput, cmd = m.CreateJiraKeyInput.Update(msg)
+	}
+	return m, cmd
+}
+
+// confirmCreateModal closes the create modal and dispatches the async create command.
+func (m Model) confirmCreateModal() (tea.Model, tea.Cmd) {
+	m.ModalActive = false
+	m.CreateFiguraInput.Blur()
+	m.CreateJiraKeyInput.Blur()
+	figura := m.CreateFiguraInput.Value()
+	jiraKey := m.CreateJiraKeyInput.Value()
+	actor := m.actor
+	cmd := func() tea.Msg {
+		err := actor.CreateWorktree(context.Background(), figura, jiraKey)
+		return ActionResultMsg{Err: err}
+	}
+	return m, cmd
+}
+
+// openCreateModal resets the create inputs, focuses the figura field, and
+// sets ModalMode to ModalModeCreate. It is a no-op when actor is nil.
+func (m Model) openCreateModal() (Model, tea.Cmd) {
+	if m.actor == nil {
+		return m, nil
+	}
+	m.CreateFiguraInput.SetValue("")
+	m.CreateJiraKeyInput.SetValue("")
+	m.CreateJiraKeyInput.Blur()
+	m.ModalActive = true
+	m.ModalMode = ModalModeCreate
+	m.ModalTitle = "New worktree"
+	cmd := m.CreateFiguraInput.Focus()
+	return m, cmd
+}
+
 // ─── Modal open helpers ───────────────────────────────────────────────────────
 
 // openTeardownModal opens the confirmation dialog for the currently-selected
@@ -140,6 +239,7 @@ func (m Model) openTeardownModal() Model {
 		figura = wt.Figura
 	}
 	m.ModalActive = true
+	m.ModalMode = ModalModeConfirm
 	m.ModalTitle = "Confirm teardown"
 	m.ModalMessage = fmt.Sprintf("Tear down worktree for %s (%s)?", figura, jiraKey)
 	m.modalFigura = figura

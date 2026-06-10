@@ -24,8 +24,11 @@ func (m Model) View() string {
 		base = m.viewWorktreeList()
 	}
 
-	// Overlay the confirmation modal when active.
+	// Overlay the active modal.
 	if m.ModalActive {
+		if m.ModalMode == ModalModeCreate {
+			return m.overlayCreateModal(base)
+		}
 		return m.overlayModal(base)
 	}
 	return base
@@ -447,6 +450,63 @@ func (m Model) overlayModal(base string) string {
 
 	// Place the modal box centered over the terminal canvas.
 	// The whitespace fill uses colorBase so the box floats over a dark backdrop.
+	return lipgloss.Place(w+4, h, lipgloss.Center, lipgloss.Center, box,
+		lipgloss.WithWhitespaceChars(" "),
+		lipgloss.WithWhitespaceForeground(colorBase),
+	)
+}
+
+// ─── Create-worktree modal ────────────────────────────────────────────────────
+
+// overlayCreateModal renders the text-input create modal centered over base.
+func (m Model) overlayCreateModal(base string) string {
+	w := m.effectiveWidth()
+	h := m.Height
+	if h <= 0 {
+		h = 30
+	}
+
+	titleLine := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(colorMauve).
+		Render(m.ModalTitle)
+
+	figuraLabel := m.Theme.Subtle.Render("figura  ")
+	figuraField := m.CreateFiguraInput.View()
+
+	jiraLabel := m.Theme.Subtle.Render("jira key")
+	jiraField := m.CreateJiraKeyInput.View()
+
+	// Validation hint — shown when inputs are non-empty but invalid.
+	var hint string
+	figVal := m.CreateFiguraInput.Value()
+	jiraVal := m.CreateJiraKeyInput.Value()
+	switch {
+	case figVal != "" && !reValidFigura.MatchString(figVal):
+		hint = m.Theme.Error.Render("figura: lowercase letters only")
+	case jiraVal != "" && !reValidJiraKey.MatchString(jiraVal):
+		hint = m.Theme.Error.Render("key: must match TAL-NNN")
+	default:
+		hint = m.Theme.Subtle.Render("[tab] next   [enter] confirm   [esc] cancel")
+	}
+
+	inner := strings.Join([]string{
+		titleLine,
+		"",
+		figuraLabel + figuraField,
+		jiraLabel + " " + jiraField,
+		"",
+		hint,
+	}, "\n")
+
+	boxStyle := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(colorLavender).
+		Padding(1, 3).
+		Width(w / 2)
+
+	box := boxStyle.Render(inner)
+
 	return lipgloss.Place(w+4, h, lipgloss.Center, lipgloss.Center, box,
 		lipgloss.WithWhitespaceChars(" "),
 		lipgloss.WithWhitespaceForeground(colorBase),

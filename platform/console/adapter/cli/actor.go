@@ -61,3 +61,9 @@ var _ port.PlatformActor = (*Actor)(nil)
 func (a *Actor) TeardownWorktree(ctx context.Context, figura, jiraKey string) error {
 	return runCmd(ctx, a.wtBinary, "teardown", figura, jiraKey)
 }
+
+// CreateWorktree creates a new worktree for the given figura and jiraKey by
+// running `wt create <figura> <jiraKey>`.
+func (a *Actor) CreateWorktree(ctx context.Context, figura, jiraKey string) error {
+	return runCmd(ctx, a.wtBinary, "create", figura, jiraKey)
+}

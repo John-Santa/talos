@@ -14,6 +14,9 @@ type PlatformActorMock struct {
 
 	// TeardownErr is the error returned by TeardownWorktree (nil = success).
 	TeardownErr error
+
+	// CreateErr is the error returned by CreateWorktree (nil = success).
+	CreateErr error
 }
 
 // compile-time check: PlatformActorMock must satisfy port.PlatformActor.
@@ -62,4 +65,10 @@ func (m *PlatformActorMock) AssertNotCalled(t interface {
 func (m *PlatformActorMock) TeardownWorktree(_ context.Context, figura, jiraKey string) error {
 	m.Calls = append(m.Calls, Call{Method: "TeardownWorktree", Args: []any{figura, jiraKey}})
 	return m.TeardownErr
+}
+
+// CreateWorktree records the call and returns the programmed CreateErr.
+func (m *PlatformActorMock) CreateWorktree(_ context.Context, figura, jiraKey string) error {
+	m.Calls = append(m.Calls, Call{Method: "CreateWorktree", Args: []any{figura, jiraKey}})
+	return m.CreateErr
 }
