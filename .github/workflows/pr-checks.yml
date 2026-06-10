@@ -64,12 +64,26 @@ jobs:
       - name: Vitest placeholder (frontend — TODO Fase 5+)
         run: |
           echo "vitest: no frontend changes detected or not yet wired"
-      - name: Assert verify-report present
+      - name: Assert verify-report present for touched change(s)
         run: |
-          if ! ls openspec/changes/**/verify-report.md 2>/dev/null; then
-            echo "::error::No verify-report.md found under openspec/changes/ — DoD requires a verify-report for this change"
-            exit 1
+          # Derive the change folder(s) this PR touches — active or archived — and
+          # require EACH to have its own verify-report.md (per-change, not "any report anywhere").
+          CHANGE_DIRS=$(git diff --name-only origin/${{ github.base_ref }}...HEAD \
+            | grep -E '^openspec/changes/(archive/)?[^/]+/' \
+            | sed -E 's#^(openspec/changes/(archive/)?[^/]+)/.*#\1#' \
+            | sort -u)
+          if [ -z "$CHANGE_DIRS" ]; then
+            echo "::notice::No SDD change touched — verify-report check N/A"
+            exit 0
           fi
+          missing=0
+          for dir in $CHANGE_DIRS; do
+            if [ ! -f "$dir/verify-report.md" ]; then
+              echo "::error::No verify-report.md in $dir — DoD requires a verify-report for this change"
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ]
 
   judgment:
     # Archive-scoped gate (HG5): fires ONLY when this PR moves a change folder
