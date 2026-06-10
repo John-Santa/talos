@@ -87,7 +87,7 @@ func (g *Gateway) Judgment(ctx context.Context, jiraKey string) (domain.Judgment
 		Gate:     "HG5",
 		Judges:   []domain.Judge{},
 		FixAgent: "idle",
-		Verdict:  "agree",
+		Verdict:  "pending",
 		Pending:  true,
 	}, nil
 }
