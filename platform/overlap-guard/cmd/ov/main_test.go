@@ -8,7 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/John-Santa/talos/platform/overlap-guard/adapter/gitremote"
 	"github.com/John-Santa/talos/platform/overlap-guard/domain/overlap"
+	"github.com/John-Santa/talos/platform/overlap-guard/mock"
+	"github.com/John-Santa/talos/platform/overlap-guard/service"
 )
 
 // fakeScanner/fakeChecker/fakeMetricer inject a canned report+error into the run* seams so the
@@ -599,5 +602,39 @@ func TestRunScan_SourceError_Propagates(t *testing.T) {
 	err := runScan(context.Background(), &buf, fakeScanner{err: sentinel}, true)
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("runScan should propagate source error, got %v", err)
+	}
+}
+
+// TestRunScan_RealGuardExplicitBranches_BlockExit1 is the full-gate integration lock: the explicit
+// open-PR set flows NewListerFromBranches → Guard.ScanInFlight → figuraFromBranch → emit → exit code,
+// with only the git inspector mocked. Two open PRs touching shared.go → BLOCK → exit 1 + valid JSON.
+func TestRunScan_RealGuardExplicitBranches_BlockExit1(t *testing.T) {
+	t.Parallel()
+
+	lister := gitremote.NewListerFromBranches([]string{"agent/themis/TAL-16", "agent/atlas/TAL-5"})
+	inspector := mock.NewGitInspectorMock()
+	inspector.RevParseResults = map[string]string{"develop": "abc123"}
+	inspector.ChangedFilesByBranch = map[string][]string{
+		"origin/agent/themis/TAL-16": {"shared.go"},
+		"origin/agent/atlas/TAL-5":   {"shared.go"},
+	}
+	cfg := service.DefaultTALConfig()
+	cfg.NoFetch = true
+	guard := service.NewGuard(nil, lister, inspector, cfg)
+
+	var buf bytes.Buffer
+	err := runScan(context.Background(), &buf, guard, true)
+	if err == nil {
+		t.Fatal("real-guard BLOCK through runScan = nil, want exit-1 error")
+	}
+	if got := exitCodeFor(err); got != 1 {
+		t.Errorf("exitCodeFor = %d, want 1", got)
+	}
+	var out scanOnlyJSON
+	if e := json.Unmarshal(buf.Bytes(), &out); e != nil {
+		t.Fatalf("stdout not valid JSON: %v\n%s", e, buf.String())
+	}
+	if out.Verdict != "BLOCK" {
+		t.Errorf("verdict = %q, want BLOCK", out.Verdict)
 	}
 }

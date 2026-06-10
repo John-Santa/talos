@@ -34,6 +34,13 @@ func (g *Guard) ScanInFlight(ctx context.Context) (overlap.Report, error) {
 		return overlap.Report{}, fmt.Errorf("listing worktrees: %w", err)
 	}
 
+	// No active in-flight branches → nothing to compare. Short-circuit BEFORE fetch/base-resolution:
+	// a zero-PR scan must exit 0 (ErrNoClaims) regardless of whether the base ref resolves on a CI
+	// checkout, and there is no reason to shell out to git when there is nothing to diff.
+	if !hasActive(entries) {
+		return overlap.Report{}, &overlap.ErrNoClaims{}
+	}
+
 	if !g.cfg.NoFetch {
 		if err := g.inspector.Fetch(ctx); err != nil {
 			return overlap.Report{}, fmt.Errorf("fetching origin: %w", err)
@@ -106,9 +113,22 @@ func (g *Guard) Metric(ctx context.Context) (overlap.Report, error) {
 	return g.ScanInFlight(ctx)
 }
 
+// hasActive reports whether any entry is in-flight ("active"). Used to skip fetch/base-resolution
+// when there is nothing to compare.
+func hasActive(entries []port.WorktreeEntry) bool {
+	for _, e := range entries {
+		if e.Status == "active" {
+			return true
+		}
+	}
+	return false
+}
+
 func figuraFromBranch(branch, fallback string) string {
-	// agent/<figura>/TAL-N → figura
-	parts := strings.Split(branch, "/")
+	// [origin/]agent/<figura>/TAL-N → figura. Remote-mode entries (gitremote) are "origin/"-prefixed,
+	// so strip it before parsing — otherwise the agent identity would silently depend on the fallback.
+	b := strings.TrimPrefix(branch, "origin/")
+	parts := strings.Split(b, "/")
 	if len(parts) >= 2 && parts[0] == "agent" {
 		return parts[1]
 	}
