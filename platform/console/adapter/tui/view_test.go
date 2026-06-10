@@ -207,6 +207,38 @@ func TestView_Overview_WithMergePlanError_ShowsErrorInPanel(t *testing.T) {
 	}
 }
 
+// ─── Full-help expanded golden ────────────────────────────────────────────────
+
+func TestView_WorktreeList_FullHelp_GoldenFile(t *testing.T) {
+	m := modelWithFixedState()
+	// Toggle full help.
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	m = next.(tui.Model)
+
+	got := m.View()
+
+	goldenPath := filepath.Join("testdata", "worktrees-fullhelp.golden")
+
+	if *update {
+		if err := os.MkdirAll(filepath.Dir(goldenPath), 0o755); err != nil {
+			t.Fatalf("mkdir testdata: %v", err)
+		}
+		if err := os.WriteFile(goldenPath, []byte(got), 0o644); err != nil {
+			t.Fatalf("write golden: %v", err)
+		}
+		t.Logf("golden file updated: %s", goldenPath)
+		return
+	}
+
+	want, err := os.ReadFile(goldenPath)
+	if err != nil {
+		t.Fatalf("golden file missing — run: go test ./adapter/tui -update\n%v", err)
+	}
+	if got != string(want) {
+		t.Errorf("View() full-help output does not match golden file %s\n\n--- got ---\n%s\n--- want ---\n%s", goldenPath, got, string(want))
+	}
+}
+
 // ─── MasterDetail golden still matches after new layout code ─────────────────
 
 func TestView_MasterDetail_GoldenStillValid(t *testing.T) {

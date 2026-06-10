@@ -264,3 +264,136 @@ func TestUpdate_TabKey_CyclesThreeTimes(t *testing.T) {
 		}
 	}
 }
+
+// ─── (e) ? key toggles help short ↔ full ─────────────────────────────────────
+
+func TestUpdate_QuestionMark_TogglesHelpToFull(t *testing.T) {
+	m := newModel(nil)
+	snap := service.Snapshot{Worktrees: threeWorktrees()}
+	m = m.WithSnapshot(snap)
+
+	// Default: short help (ShowAll == false).
+	if m.HelpShowAll {
+		t.Fatal("precondition: HelpShowAll must start false")
+	}
+
+	m = sendKey(m, "?")
+
+	if !m.HelpShowAll {
+		t.Error("after ?: HelpShowAll should be true (full help)")
+	}
+}
+
+func TestUpdate_QuestionMark_TogglesHelpBackToShort(t *testing.T) {
+	// Triangulate: second ? returns to short.
+	m := newModel(nil)
+	snap := service.Snapshot{Worktrees: threeWorktrees()}
+	m = m.WithSnapshot(snap)
+
+	m = sendKey(m, "?")
+	if !m.HelpShowAll {
+		t.Fatal("after first ?: HelpShowAll should be true")
+	}
+
+	m = sendKey(m, "?")
+	if m.HelpShowAll {
+		t.Error("after second ?: HelpShowAll should be false (back to short)")
+	}
+}
+
+func TestUpdate_QuestionMark_TriangulateCycle(t *testing.T) {
+	// Triangulate: three ? presses → true, false, true.
+	m := newModel(nil)
+	snap := service.Snapshot{Worktrees: threeWorktrees()}
+	m = m.WithSnapshot(snap)
+
+	expects := []bool{true, false, true}
+	for i, want := range expects {
+		m = sendKey(m, "?")
+		if m.HelpShowAll != want {
+			t.Errorf("press %d: HelpShowAll = %v, want %v", i+1, m.HelpShowAll, want)
+		}
+	}
+}
+
+// ─── (f) viewport: j past bottom advances YOffset ────────────────────────────
+
+func manyWorktrees(n int) []platform.Worktree {
+	out := make([]platform.Worktree, n)
+	for i := range out {
+		out[i] = platform.Worktree{
+			Figura: "atlas",
+			Branch: "agent/atlas/TAL-1",
+			Head:   "abc1234",
+			Status: "clean",
+		}
+	}
+	return out
+}
+
+func TestUpdate_JKey_PastViewportBottom_AdvancesYOffset(t *testing.T) {
+	// Use a window small enough that not all rows fit.
+	// Height=10 means viewport body ≈ 5-6 lines; 20 rows guarantees overflow.
+	wts := manyWorktrees(20)
+	m := newModel(wts)
+	snap := service.Snapshot{Worktrees: wts}
+	m = m.WithSnapshot(snap)
+
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 10})
+	m = next.(tui.Model)
+
+	// Press j enough times to push past the visible window.
+	for i := 0; i < 15; i++ {
+		m = sendKey(m, "j")
+	}
+
+	if m.ViewportYOffset <= 0 {
+		t.Errorf("after pressing j past viewport bottom, ViewportYOffset should be > 0, got %d", m.ViewportYOffset)
+	}
+}
+
+func TestUpdate_KKey_AtTop_YOffsetStaysZero(t *testing.T) {
+	// Triangulate: pressing k at top does not go negative.
+	wts := manyWorktrees(20)
+	m := newModel(wts)
+	snap := service.Snapshot{Worktrees: wts}
+	m = m.WithSnapshot(snap)
+
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 10})
+	m = next.(tui.Model)
+
+	m = sendKey(m, "k")
+	if m.ViewportYOffset < 0 {
+		t.Errorf("ViewportYOffset should never go negative, got %d", m.ViewportYOffset)
+	}
+}
+
+func TestUpdate_JThenK_CursorComesBack_OffsetFollows(t *testing.T) {
+	// Triangulate: after scrolling down with j, pressing k brings cursor back;
+	// once cursor re-enters the top of the visible window, YOffset decreases.
+	wts := manyWorktrees(20)
+	m := newModel(wts)
+	snap := service.Snapshot{Worktrees: wts}
+	m = m.WithSnapshot(snap)
+
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 10})
+	m = next.(tui.Model)
+
+	// Scroll down a lot.
+	for i := 0; i < 15; i++ {
+		m = sendKey(m, "j")
+	}
+	highOffset := m.ViewportYOffset
+
+	// Now scroll back fully.
+	for i := 0; i < 15; i++ {
+		m = sendKey(m, "k")
+	}
+
+	if m.ViewportYOffset >= highOffset {
+		t.Errorf("after pressing k to return to top, YOffset (%d) should be less than peak (%d)", m.ViewportYOffset, highOffset)
+	}
+	if m.Cursor != 0 {
+		t.Errorf("cursor should be back at 0, got %d", m.Cursor)
+	}
+}
