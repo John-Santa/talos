@@ -17,3 +17,10 @@ type PlatformReader interface {
 	// Ready reports whether the underlying repo/tooling is usable (for /readyz).
 	Ready(ctx context.Context) error
 }
+
+// PlatformWriter performs worktree write actions (native git, no binaries).
+type PlatformWriter interface {
+	CreateWorktree(ctx context.Context, figura, jiraKey string) error
+	TeardownWorktree(ctx context.Context, figura string) error
+	Merge(ctx context.Context, jiraKey string) error
+}

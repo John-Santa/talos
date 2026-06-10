@@ -1,8 +1,8 @@
-// Package gitfs is the native PlatformReader: it produces orchestration inputs
-// from the local repo using only `git` and team-context/ownership.md — no
-// wt/mo/ov/ch binaries, no network, no Jira. Merge-order and overlap are derived
-// (commits-ahead via git rev-list; collisions via shared module ownership)
-// rather than computed with mo/ov's full conflict-prediction engines.
+// Package gitfs is the native PlatformReader/Writer: it produces orchestration
+// inputs and performs worktree write actions using only `git` and
+// team-context/ownership.md — no wt/mo/ov/ch binaries, no network, no Jira.
+// Merge-order and overlap are derived (commits-ahead via git rev-list;
+// collisions via shared module ownership).
 package gitfs
 
 import (
@@ -17,9 +17,18 @@ import (
 	"github.com/John-Santa/talos/platform/webapi/domain"
 )
 
+// gitRunner runs `git -C <dir> <args...>` and returns stdout. Injectable for tests.
+type gitRunner func(ctx context.Context, dir string, args ...string) ([]byte, error)
+
+func execGit(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	full := append([]string{"-C", dir}, args...)
+	return exec.CommandContext(ctx, "git", full...).Output()
+}
+
 type Reader struct {
 	root string
 	base string
+	run  gitRunner
 }
 
 // New builds a Reader for the given repo root (base defaults to "develop").
@@ -27,7 +36,7 @@ func New(root, base string) *Reader {
 	if base == "" {
 		base = "develop"
 	}
-	return &Reader{root: root, base: base}
+	return &Reader{root: root, base: base, run: execGit}
 }
 
 // NewAutodetect resolves the repo root from the current working directory.
@@ -40,8 +49,7 @@ func NewAutodetect(base string) (*Reader, error) {
 }
 
 func (r *Reader) git(ctx context.Context, args ...string) ([]byte, error) {
-	full := append([]string{"-C", r.root}, args...)
-	return exec.CommandContext(ctx, "git", full...).Output()
+	return r.run(ctx, r.root, args...)
 }
 
 // Ready verifies the root is a usable git repository.
@@ -60,27 +68,33 @@ func figuraFromBranch(branch string) (string, bool) {
 	return "", false
 }
 
-// Worktrees parses `git worktree list --porcelain`, keeping only agent worktrees.
-func (r *Reader) Worktrees(ctx context.Context) ([]domain.WtEntry, error) {
+type rawWorktree struct {
+	Path   string
+	Branch string
+	Head   string
+}
+
+func (r *Reader) rawWorktrees(ctx context.Context) ([]rawWorktree, error) {
 	out, err := r.git(ctx, "worktree", "list", "--porcelain")
 	if err != nil {
 		return nil, fmt.Errorf("git worktree list: %w", err)
 	}
-	var entries []domain.WtEntry
-	var cur domain.WtEntry
-	keep := false
+	var list []rawWorktree
+	var cur rawWorktree
+	started := false
 	flush := func() {
-		if keep {
-			entries = append(entries, cur)
+		if started {
+			list = append(list, cur)
 		}
-		cur = domain.WtEntry{}
-		keep = false
+		cur = rawWorktree{}
+		started = false
 	}
 	for _, line := range strings.Split(string(out), "\n") {
 		switch {
 		case strings.HasPrefix(line, "worktree "):
 			flush()
 			cur.Path = strings.TrimPrefix(line, "worktree ")
+			started = true
 		case strings.HasPrefix(line, "HEAD "):
 			head := strings.TrimPrefix(line, "HEAD ")
 			if len(head) > 7 {
@@ -88,16 +102,33 @@ func (r *Reader) Worktrees(ctx context.Context) ([]domain.WtEntry, error) {
 			}
 			cur.Head = head
 		case strings.HasPrefix(line, "branch "):
-			branch := strings.TrimPrefix(strings.TrimPrefix(line, "branch "), "refs/heads/")
-			if fig, ok := figuraFromBranch(branch); ok {
-				cur.Branch = branch
-				cur.Figura = fig
-				cur.Status = "active"
-				keep = true
-			}
+			cur.Branch = strings.TrimPrefix(strings.TrimPrefix(line, "branch "), "refs/heads/")
 		}
 	}
 	flush()
+	return list, nil
+}
+
+// Worktrees returns the agent worktrees (branches matching agent/<figura>/...).
+func (r *Reader) Worktrees(ctx context.Context) ([]domain.WtEntry, error) {
+	raws, err := r.rawWorktrees(ctx)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]domain.WtEntry, 0, len(raws))
+	for _, w := range raws {
+		fig, ok := figuraFromBranch(w.Branch)
+		if !ok {
+			continue
+		}
+		entries = append(entries, domain.WtEntry{
+			Figura: fig,
+			Branch: w.Branch,
+			Path:   w.Path,
+			Head:   w.Head,
+			Status: "active",
+		})
+	}
 	return entries, nil
 }
 
@@ -209,4 +240,66 @@ func (r *Reader) Overlap(ctx context.Context) (domain.OvScan, error) {
 		PairsEvaluated: total,
 		CollidingPairs: colliding,
 	}, nil
+}
+
+// --- write actions (native git) ---------------------------------------------
+
+// CreateWorktree adds an isolated worktree+branch for a figura off the base.
+func (r *Reader) CreateWorktree(ctx context.Context, figura, jiraKey string) error {
+	branch := fmt.Sprintf("agent/%s/%s", figura, jiraKey)
+	path := fmt.Sprintf("talos.wt/agent-%s", figura)
+	if _, err := r.git(ctx, "worktree", "add", path, "-b", branch, r.base); err != nil {
+		return fmt.Errorf("create worktree %s: %w", branch, err)
+	}
+	return nil
+}
+
+// TeardownWorktree removes the worktree owned by a figura.
+func (r *Reader) TeardownWorktree(ctx context.Context, figura string) error {
+	raws, err := r.rawWorktrees(ctx)
+	if err != nil {
+		return err
+	}
+	for _, w := range raws {
+		if fig, ok := figuraFromBranch(w.Branch); ok && fig == figura {
+			if _, err := r.git(ctx, "worktree", "remove", "--force", w.Path); err != nil {
+				return fmt.Errorf("teardown %s: %w", figura, err)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("no worktree for figura %q", figura)
+}
+
+// Merge merges the worktree's branch into base, guarded by a non-destructive
+// conflict check (git merge-tree). Aborts without touching anything on conflict.
+func (r *Reader) Merge(ctx context.Context, jiraKey string) error {
+	raws, err := r.rawWorktrees(ctx)
+	if err != nil {
+		return err
+	}
+	branch := ""
+	developPath := ""
+	for _, w := range raws {
+		if w.Branch == r.base {
+			developPath = w.Path
+		}
+		if _, ok := figuraFromBranch(w.Branch); ok && strings.HasSuffix(w.Branch, "/"+jiraKey) {
+			branch = w.Branch
+		}
+	}
+	if branch == "" {
+		return fmt.Errorf("no worktree for %q", jiraKey)
+	}
+	// Non-destructive conflict check: merge-tree exits non-zero on conflicts.
+	if _, err := r.git(ctx, "merge-tree", "--write-tree", r.base, branch); err != nil {
+		return fmt.Errorf("merge of %s into %s would conflict — aborted", branch, r.base)
+	}
+	if developPath == "" {
+		return fmt.Errorf("%s is not checked out in any worktree", r.base)
+	}
+	if _, err := r.run(ctx, developPath, "merge", "--no-edit", branch); err != nil {
+		return fmt.Errorf("merge %s into %s failed: %w", branch, r.base, err)
+	}
+	return nil
 }

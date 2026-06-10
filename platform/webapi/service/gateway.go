@@ -10,14 +10,15 @@ import (
 )
 
 // Gateway maps the platform state (read via a PlatformReader — git + ownership
-// file, no binaries) onto the web domain.
+// file, no binaries) onto the web domain, and performs worktree write actions.
 type Gateway struct {
 	reader port.PlatformReader
+	writer port.PlatformWriter
 }
 
-// NewGateway constructs a Gateway over the given reader.
-func NewGateway(r port.PlatformReader) *Gateway {
-	return &Gateway{reader: r}
+// NewGateway constructs a Gateway over the given reader + writer.
+func NewGateway(reader port.PlatformReader, writer port.PlatformWriter) *Gateway {
+	return &Gateway{reader: reader, writer: writer}
 }
 
 // Ready reports whether the underlying repo/tooling is usable.
@@ -79,4 +80,19 @@ func (g *Gateway) Judgment(_ context.Context, jiraKey string) (domain.JudgmentRe
 		FixAgent: "idle",
 		Verdict:  "agree",
 	}, nil
+}
+
+// CreateWorktree spins up an isolated worktree for a figura.
+func (g *Gateway) CreateWorktree(ctx context.Context, figura, jiraKey string) error {
+	return g.writer.CreateWorktree(ctx, figura, jiraKey)
+}
+
+// TeardownWorktree removes a figura's worktree.
+func (g *Gateway) TeardownWorktree(ctx context.Context, figura string) error {
+	return g.writer.TeardownWorktree(ctx, figura)
+}
+
+// MergeWorktree merges a worktree's branch into the base (guarded).
+func (g *Gateway) MergeWorktree(ctx context.Context, jiraKey string) error {
+	return g.writer.Merge(ctx, jiraKey)
 }

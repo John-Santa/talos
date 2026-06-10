@@ -37,7 +37,11 @@ func (fakeReader) Ownership(context.Context) (map[string]string, error) {
 
 func (fakeReader) Ready(context.Context) error { return nil }
 
-func newGateway() *Gateway { return NewGateway(fakeReader{}) }
+func (fakeReader) CreateWorktree(context.Context, string, string) error { return nil }
+func (fakeReader) TeardownWorktree(context.Context, string) error       { return nil }
+func (fakeReader) Merge(context.Context, string) error                  { return nil }
+
+func newGateway() *Gateway { return NewGateway(fakeReader{}, fakeReader{}) }
 
 func TestGatewayOrchestration(t *testing.T) {
 	snap, err := newGateway().Orchestration(context.Background())
@@ -83,6 +87,20 @@ func TestGatewayAgents(t *testing.T) {
 func TestGatewayReady(t *testing.T) {
 	if err := newGateway().Ready(context.Background()); err != nil {
 		t.Errorf("Ready = %v, want nil", err)
+	}
+}
+
+func TestGatewayWriteDelegation(t *testing.T) {
+	g := newGateway()
+	ctx := context.Background()
+	if err := g.CreateWorktree(ctx, "atlas", "TAL-99"); err != nil {
+		t.Errorf("CreateWorktree = %v", err)
+	}
+	if err := g.TeardownWorktree(ctx, "atlas"); err != nil {
+		t.Errorf("TeardownWorktree = %v", err)
+	}
+	if err := g.MergeWorktree(ctx, "TAL-15"); err != nil {
+		t.Errorf("MergeWorktree = %v", err)
 	}
 }
 
