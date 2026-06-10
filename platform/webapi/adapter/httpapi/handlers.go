@@ -4,26 +4,39 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/John-Santa/talos/platform/webapi/domain"
 )
 
 // Service is the inbound port the handlers depend on.
 type Service interface {
+	Ready(ctx context.Context) error
 	Orchestration(ctx context.Context) (domain.OrchestrationSnapshot, error)
 	Agents(ctx context.Context) []domain.Agent
 	Agent(ctx context.Context, figura string) (domain.AgentDetail, error)
 	Judgment(ctx context.Context, jiraKey string) (domain.JudgmentReview, error)
 }
 
-// New wires the read-only routes and CORS for the given allowed origin
-// (empty = "*").
-func New(svc Service, corsOrigin string) http.Handler {
+// New wires the read-only routes, CORS, and request logging.
+func New(svc Service, corsOrigin string, logger *slog.Logger) http.Handler {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
+
+	mux.HandleFunc("GET /api/readyz", func(w http.ResponseWriter, r *http.Request) {
+		if err := svc.Ready(r.Context()); err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable", "error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 	})
 
 	mux.HandleFunc("GET /api/orchestration", func(w http.ResponseWriter, r *http.Request) {
@@ -57,7 +70,7 @@ func New(svc Service, corsOrigin string) http.Handler {
 		writeJSON(w, http.StatusOK, review)
 	})
 
-	return withCORS(corsOrigin, mux)
+	return withLogging(logger, withCORS(corsOrigin, mux))
 }
 
 func withCORS(origin string, next http.Handler) http.Handler {
@@ -73,6 +86,30 @@ func withCORS(origin string, next http.Handler) http.Handler {
 			return
 		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func withLogging(logger *slog.Logger, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(sw, r)
+		logger.Info("request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", sw.status,
+			"dur", time.Since(start).String(),
+		)
 	})
 }
 

@@ -1,69 +1,41 @@
-// Package service aggregates the platform CLIs into the web-facing payloads.
+// Package service aggregates the platform state into the web-facing payloads.
 package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/John-Santa/talos/platform/webapi/domain"
 	"github.com/John-Santa/talos/platform/webapi/port"
 )
 
-// Gateway reads orchestration state through the CLI executor and maps it onto
-// the web domain. wt is required; mo/ov/ch are best-effort (zero on failure).
+// Gateway maps the platform state (read via a PlatformReader — git + ownership
+// file, no binaries) onto the web domain.
 type Gateway struct {
-	exec port.CLIExecutor
+	reader port.PlatformReader
 }
 
-// NewGateway constructs a Gateway over the given executor.
-func NewGateway(e port.CLIExecutor) *Gateway {
-	return &Gateway{exec: e}
+// NewGateway constructs a Gateway over the given reader.
+func NewGateway(r port.PlatformReader) *Gateway {
+	return &Gateway{reader: r}
 }
 
-func (g *Gateway) worktrees(ctx context.Context) ([]domain.WtEntry, error) {
-	out, err := g.exec.Run(ctx, "wt", "list", "--json")
-	if err != nil {
-		return nil, fmt.Errorf("wt list: %w", err)
-	}
-	var entries []domain.WtEntry
-	if err := json.Unmarshal(out, &entries); err != nil {
-		return nil, fmt.Errorf("wt list decode: %w", err)
-	}
-	return entries, nil
+// Ready reports whether the underlying repo/tooling is usable.
+func (g *Gateway) Ready(ctx context.Context) error {
+	return g.reader.Ready(ctx)
 }
 
-func (g *Gateway) plan(ctx context.Context) domain.MoPlan {
-	var p domain.MoPlan
-	if out, err := g.exec.Run(ctx, "mo", "plan", "--json"); err == nil {
-		_ = json.Unmarshal(out, &p)
-	}
-	return p
-}
-
-func (g *Gateway) scan(ctx context.Context) domain.OvScan {
-	var s domain.OvScan
-	if out, err := g.exec.Run(ctx, "ov", "scan", "--json"); err == nil {
-		_ = json.Unmarshal(out, &s)
-	}
-	return s
-}
-
-func (g *Gateway) ownership(ctx context.Context) map[string]string {
-	var o domain.ChOwnership
-	if out, err := g.exec.Run(ctx, "ch", "ownership", "--json"); err == nil {
-		_ = json.Unmarshal(out, &o)
-	}
-	return o.Modules
-}
-
-// Orchestration returns the merged snapshot for the main screen.
+// Orchestration returns the merged snapshot for the main screen. Worktrees are
+// required; merge-order/overlap/ownership are best-effort.
 func (g *Gateway) Orchestration(ctx context.Context) (domain.OrchestrationSnapshot, error) {
-	wts, err := g.worktrees(ctx)
+	wts, err := g.reader.Worktrees(ctx)
 	if err != nil {
 		return domain.OrchestrationSnapshot{}, err
 	}
-	return domain.BuildSnapshot(wts, g.plan(ctx), g.scan(ctx), g.ownership(ctx)), nil
+	plan, _ := g.reader.MergePlan(ctx)
+	scan, _ := g.reader.Overlap(ctx)
+	own, _ := g.reader.Ownership(ctx)
+	return domain.BuildSnapshot(wts, plan, scan, own), nil
 }
 
 // Agents returns the full roster.
@@ -71,7 +43,7 @@ func (g *Gateway) Agents(_ context.Context) []domain.Agent {
 	return domain.AllAgents()
 }
 
-// Agent returns an agent's detail. DoD and activity have no CLI source yet, so
+// Agent returns an agent's detail. DoD and activity have no offline source, so
 // they come back empty; the worktree (if any) is real.
 func (g *Gateway) Agent(ctx context.Context, figura string) (domain.AgentDetail, error) {
 	agent, ok := domain.AgentByID(figura)
@@ -83,9 +55,9 @@ func (g *Gateway) Agent(ctx context.Context, figura string) (domain.AgentDetail,
 		DoD:      []domain.DoDItem{},
 		Activity: []domain.ActivityEntry{},
 	}
-	if wts, err := g.worktrees(ctx); err == nil {
-		own := g.ownership(ctx)
-		plan := g.plan(ctx)
+	if wts, err := g.reader.Worktrees(ctx); err == nil {
+		own, _ := g.reader.Ownership(ctx)
+		plan, _ := g.reader.MergePlan(ctx)
 		for _, e := range wts {
 			if domain.NormalizeFigura(e.Figura) == figura {
 				w := domain.MapWorktree(e, own, plan)
@@ -97,20 +69,14 @@ func (g *Gateway) Agent(ctx context.Context, figura string) (domain.AgentDetail,
 	return detail, nil
 }
 
-// Judgment returns the Judgment Day payload for an issue (best-effort from ch).
-func (g *Gateway) Judgment(ctx context.Context, jiraKey string) (domain.JudgmentReview, error) {
-	review := domain.JudgmentReview{
+// Judgment has no offline source (ch judgment needs Jira); returns a minimal
+// review so the front degrades gracefully.
+func (g *Gateway) Judgment(_ context.Context, jiraKey string) (domain.JudgmentReview, error) {
+	return domain.JudgmentReview{
 		JiraKey:  jiraKey,
 		Gate:     "HG5",
 		Judges:   []domain.Judge{},
 		FixAgent: "idle",
 		Verdict:  "agree",
-	}
-	if out, err := g.exec.Run(ctx, "ch", "judgment", "--json"); err == nil {
-		var cj domain.ChJudgment
-		if json.Unmarshal(out, &cj) == nil {
-			review = domain.MapJudgment(jiraKey, cj)
-		}
-	}
-	return review, nil
+	}, nil
 }

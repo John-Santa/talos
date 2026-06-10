@@ -2,35 +2,42 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"testing"
+
+	"github.com/John-Santa/talos/platform/webapi/domain"
 )
 
-// fakeExec returns canned CLI output keyed by "<name> <subcommand>".
-type fakeExec struct {
-	out map[string]string
+// fakeReader returns canned platform state (no git, no files).
+type fakeReader struct{}
+
+func (fakeReader) Worktrees(context.Context) ([]domain.WtEntry, error) {
+	return []domain.WtEntry{
+		{Figura: "hermes", Branch: "agent/hermes/TAL-15", Head: "2e61d7e", Status: "active"},
+		{Figura: "iris", Branch: "agent/iris/TAL-22", Head: "ec3ff1a", Status: "active"},
+	}, nil
 }
 
-func (f fakeExec) Run(_ context.Context, name string, args ...string) ([]byte, error) {
-	key := name
-	if len(args) > 0 {
-		key = name + " " + args[0]
-	}
-	if v, ok := f.out[key]; ok {
-		return []byte(v), nil
-	}
-	return nil, fmt.Errorf("no fake output for %q", key)
+func (fakeReader) MergePlan(context.Context) (domain.MoPlan, error) {
+	return domain.MoPlan{
+		BaseBranch: "develop",
+		Threshold:  0.15,
+		Steps: []domain.MoPlanStep{
+			{Position: 1, Branch: "agent/hermes/TAL-15", Figura: "hermes", CommitsAhead: 4, PredictedClean: true},
+		},
+	}, nil
 }
 
-var canned = map[string]string{
-	"wt list":      `[{"figura":"hermes","branch":"agent/hermes/TAL-15","head":"2e61d7e","status":"active"},{"figura":"iris","branch":"agent/iris/TAL-22","head":"ec3ff1a","status":"active"}]`,
-	"mo plan":      `{"base_branch":"develop","conflict_rate":0.0,"threshold":0.15,"steps":[{"position":1,"branch":"agent/hermes/TAL-15","figura":"hermes","commits_ahead":4,"predicted_clean":true}]}`,
-	"ov scan":      `{"verdict":"ok","collision_rate":0.0,"pairs_evaluated":0,"colliding_pairs":0}`,
-	"ch ownership": `{"modules":{"module:devops":"hermes","module:frontend":"iris"}}`,
-	"ch judgment":  `{"judges":["jd-judge-a","jd-judge-b"],"verdict":"changes","violations":["verify-report missing"]}`,
+func (fakeReader) Overlap(context.Context) (domain.OvScan, error) {
+	return domain.OvScan{Verdict: "ok", PairsEvaluated: 1, CollidingPairs: 0}, nil
 }
 
-func newGateway() *Gateway { return NewGateway(fakeExec{out: canned}) }
+func (fakeReader) Ownership(context.Context) (map[string]string, error) {
+	return map[string]string{"module:devops": "hermes", "module:frontend": "iris"}, nil
+}
+
+func (fakeReader) Ready(context.Context) error { return nil }
+
+func newGateway() *Gateway { return NewGateway(fakeReader{}) }
 
 func TestGatewayOrchestration(t *testing.T) {
 	snap, err := newGateway().Orchestration(context.Background())
@@ -67,18 +74,24 @@ func TestGatewayAgentUnknown(t *testing.T) {
 	}
 }
 
-func TestGatewayJudgment(t *testing.T) {
+func TestGatewayAgents(t *testing.T) {
+	if got := len(newGateway().Agents(context.Background())); got != 10 {
+		t.Errorf("agents = %d, want 10", got)
+	}
+}
+
+func TestGatewayReady(t *testing.T) {
+	if err := newGateway().Ready(context.Background()); err != nil {
+		t.Errorf("Ready = %v, want nil", err)
+	}
+}
+
+func TestGatewayJudgmentMinimal(t *testing.T) {
 	rev, err := newGateway().Judgment(context.Background(), "TAL-15")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rev.Verdict != "conflict" || rev.EscalateTo != "zeus" {
-		t.Errorf("judgment mapped wrong: %+v", rev)
-	}
-}
-
-func TestGatewayAgents(t *testing.T) {
-	if got := len(newGateway().Agents(context.Background())); got != 10 {
-		t.Errorf("agents = %d, want 10", got)
+	if rev.JiraKey != "TAL-15" || rev.Verdict != "agree" {
+		t.Errorf("judgment = %+v, want minimal agree", rev)
 	}
 }

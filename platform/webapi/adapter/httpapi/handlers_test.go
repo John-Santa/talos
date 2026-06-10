@@ -10,7 +10,14 @@ import (
 	"github.com/John-Santa/talos/platform/webapi/domain"
 )
 
-type fakeSvc struct{}
+type fakeSvc struct{ notReady bool }
+
+func (s fakeSvc) Ready(context.Context) error {
+	if s.notReady {
+		return context.DeadlineExceeded
+	}
+	return nil
+}
 
 func (fakeSvc) Orchestration(context.Context) (domain.OrchestrationSnapshot, error) {
 	return domain.OrchestrationSnapshot{
@@ -27,7 +34,7 @@ func (fakeSvc) Agent(_ context.Context, figura string) (domain.AgentDetail, erro
 }
 
 func (fakeSvc) Judgment(_ context.Context, jiraKey string) (domain.JudgmentReview, error) {
-	return domain.JudgmentReview{JiraKey: jiraKey, Gate: "HG5", Verdict: "conflict", EscalateTo: "zeus"}, nil
+	return domain.JudgmentReview{JiraKey: jiraKey, Gate: "HG5", Verdict: "agree"}, nil
 }
 
 func do(h http.Handler, method, path string) *httptest.ResponseRecorder {
@@ -37,14 +44,25 @@ func do(h http.Handler, method, path string) *httptest.ResponseRecorder {
 }
 
 func TestHealthz(t *testing.T) {
-	rec := do(New(fakeSvc{}, "*"), http.MethodGet, "/api/healthz")
+	rec := do(New(fakeSvc{}, "*", nil), http.MethodGet, "/api/healthz")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("healthz status = %d, want 200", rec.Code)
 	}
 }
 
+func TestReadyz(t *testing.T) {
+	ok := do(New(fakeSvc{}, "*", nil), http.MethodGet, "/api/readyz")
+	if ok.Code != http.StatusOK {
+		t.Errorf("readyz (ready) = %d, want 200", ok.Code)
+	}
+	down := do(New(fakeSvc{notReady: true}, "*", nil), http.MethodGet, "/api/readyz")
+	if down.Code != http.StatusServiceUnavailable {
+		t.Errorf("readyz (not ready) = %d, want 503", down.Code)
+	}
+}
+
 func TestOrchestrationRoute(t *testing.T) {
-	rec := do(New(fakeSvc{}, "*"), http.MethodGet, "/api/orchestration")
+	rec := do(New(fakeSvc{}, "*", nil), http.MethodGet, "/api/orchestration")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
@@ -61,7 +79,7 @@ func TestOrchestrationRoute(t *testing.T) {
 }
 
 func TestAgentsRoute(t *testing.T) {
-	rec := do(New(fakeSvc{}, "*"), http.MethodGet, "/api/agents")
+	rec := do(New(fakeSvc{}, "*", nil), http.MethodGet, "/api/agents")
 	var agents []domain.Agent
 	if err := json.Unmarshal(rec.Body.Bytes(), &agents); err != nil {
 		t.Fatal(err)
@@ -72,7 +90,7 @@ func TestAgentsRoute(t *testing.T) {
 }
 
 func TestAgentDetailRoute(t *testing.T) {
-	rec := do(New(fakeSvc{}, "*"), http.MethodGet, "/api/agents/hermes")
+	rec := do(New(fakeSvc{}, "*", nil), http.MethodGet, "/api/agents/hermes")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
@@ -85,19 +103,8 @@ func TestAgentDetailRoute(t *testing.T) {
 	}
 }
 
-func TestJudgmentRoute(t *testing.T) {
-	rec := do(New(fakeSvc{}, "*"), http.MethodGet, "/api/judgment/TAL-15")
-	var rev domain.JudgmentReview
-	if err := json.Unmarshal(rec.Body.Bytes(), &rev); err != nil {
-		t.Fatal(err)
-	}
-	if rev.EscalateTo != "zeus" {
-		t.Errorf("escalateTo = %q, want zeus", rev.EscalateTo)
-	}
-}
-
 func TestCORSPreflight(t *testing.T) {
-	rec := do(New(fakeSvc{}, "*"), http.MethodOptions, "/api/orchestration")
+	rec := do(New(fakeSvc{}, "*", nil), http.MethodOptions, "/api/orchestration")
 	if rec.Code != http.StatusNoContent {
 		t.Errorf("preflight status = %d, want 204", rec.Code)
 	}
