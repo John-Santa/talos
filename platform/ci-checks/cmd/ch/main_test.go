@@ -602,6 +602,85 @@ func TestJudgment_JSON_MALFORMED(t *testing.T) {
 	}
 }
 
+// ── --report flag tests (RED before implementation) ──────────────────────────
+
+// TestJudgment_ReportFlag_APPROVED verifies --report reads the file at that exact
+// path instead of deriving <changes-dir>/<slug>/judgment-report.md.
+func TestJudgment_ReportFlag_APPROVED(t *testing.T) {
+	// Write the report at an "archive" path (simulates archive-gate usage).
+	archiveDir := t.TempDir()
+	archiveSlugDir := filepath.Join(archiveDir, "2026-06-09-my-change")
+	if err := os.MkdirAll(archiveSlugDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	reportPath := filepath.Join(archiveSlugDir, "judgment-report.md")
+	content := judgmentReportContent("my-change", "APPROVED")
+	if err := os.WriteFile(reportPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// changesDir has no file — but --report overrides the derived path.
+	changesDir := t.TempDir()
+
+	var buf bytes.Buffer
+	err := run([]string{
+		"judgment",
+		"--change", "my-change",
+		"--changes-dir", changesDir,
+		"--report", reportPath,
+	}, &buf)
+	if err != nil {
+		t.Fatalf("expected exit 0 with --report, got err: %v", err)
+	}
+}
+
+// TestJudgment_ReportFlag_MissingFile verifies --report with a non-existent path
+// returns ErrNoJudgmentReport (exit 1).
+func TestJudgment_ReportFlag_MissingFile(t *testing.T) {
+	changesDir := t.TempDir()
+
+	var buf bytes.Buffer
+	err := run([]string{
+		"judgment",
+		"--change", "my-change",
+		"--changes-dir", changesDir,
+		"--report", "/nonexistent/path/judgment-report.md",
+	}, &buf)
+	if err == nil {
+		t.Fatal("expected error for missing --report file, got nil")
+	}
+	if exitCodeFor(err) != 1 {
+		t.Errorf("expected exit code 1, got %d", exitCodeFor(err))
+	}
+}
+
+// TestJudgment_ReportFlag_HeaderMismatch verifies --report is used for file I/O
+// but --change is still used for the Change header match (defense-in-depth).
+func TestJudgment_ReportFlag_HeaderMismatch(t *testing.T) {
+	changesDir := t.TempDir()
+	tmpDir := t.TempDir()
+	reportPath := filepath.Join(tmpDir, "judgment-report.md")
+	// Report has Change: other-change but we pass --change my-change → mismatch.
+	content := judgmentReportContent("other-change", "APPROVED")
+	if err := os.WriteFile(reportPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var buf bytes.Buffer
+	err := run([]string{
+		"judgment",
+		"--change", "my-change",
+		"--changes-dir", changesDir,
+		"--report", reportPath,
+	}, &buf)
+	if err == nil {
+		t.Fatal("expected error for Change header mismatch, got nil")
+	}
+	if exitCodeFor(err) != 1 {
+		t.Errorf("expected exit code 1, got %d", exitCodeFor(err))
+	}
+}
+
 // TestExitCodeFor_Judgment_Rows verifies new error types map to exit code 1.
 func TestExitCodeFor_Judgment_Rows(t *testing.T) {
 	cases := []struct {

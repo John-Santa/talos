@@ -2,9 +2,48 @@ package cichecks
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
+
+// verdictLineRe matches a strict JUDGMENT verdict line at column 0 (no leading
+// whitespace). It captures the verdict token only; emoji suffix validation is
+// done separately by isStrictVerdictLine. The pattern is anchored so any
+// leading whitespace disqualifies the match.
+//
+// Accepted forms (all validated together with isStrictVerdictLine):
+//
+//	JUDGMENT: APPROVED
+//	JUDGMENT: APPROVED ✅
+//	JUDGMENT: ESCALATED
+//	JUDGMENT: ESCALATED ⚠️
+var verdictLineRe = regexp.MustCompile(`^JUDGMENT: (APPROVED|ESCALATED)(.*)$`)
+
+// allowedEmojiSuffixes are the only permitted trailing tokens after the verdict
+// word (preceded by a single space). ⚠️ is two runes: U+26A0 + U+FE0F.
+var allowedEmojiSuffixes = []string{" ✅", " ⚠️"}
+
+// isStrictVerdictLine returns (verdict, ok) if line exactly matches one of the
+// four accepted verdict forms. An empty suffix is also valid (no emoji).
+// This function must be called on the raw (non-trimmed) line.
+func isStrictVerdictLine(line string) (verdict string, ok bool) {
+	m := verdictLineRe.FindStringSubmatch(line)
+	if m == nil {
+		return "", false
+	}
+	verd := m[1]  // "APPROVED" or "ESCALATED"
+	tail := m[2]  // everything after the verdict word
+	if tail == "" {
+		return verd, true
+	}
+	for _, sfx := range allowedEmojiSuffixes {
+		if tail == sfx {
+			return verd, true
+		}
+	}
+	return "", false
+}
 
 // JudgmentReport holds the parsed content of a judgment-report.md artifact.
 // It is a pure value type with no I/O dependency.
@@ -27,10 +66,15 @@ type JudgmentReport struct {
 }
 
 // ParseJudgmentReport parses the Markdown content of a judgment-report.md artifact.
-// It mirrors the line-scan approach of ParseOwnershipTable: no regex, no tokeniser.
 //
-// Required fields: Change, Round (>= 1), Judges, Implementor, Date (parsed but
-// not stored), and a terminal JUDGMENT: line. Missing any of these returns
+// Verdict detection follows the strict last-non-empty-line rule (REQ-ARTIFACT-4,
+// C2 hardening): the verdict MUST be the LAST non-empty line of the document, and
+// it MUST match exactly ^JUDGMENT: (APPROVED|ESCALATED)( [✅⚠️])?$ at column 0
+// (no leading whitespace). Any other form — indented, quoted, in prose, in a
+// fenced block, with trailing text — is rejected as malformed.
+//
+// Header fields are collected via the same line-scan used by ParseOwnershipTable.
+// Required: Change, Round (>= 1), Judges, Implementor, Date. Missing any returns
 // *ErrMalformedJudgment.
 //
 // O-1 advisory conditions (judges≠2, implementor∈judges) are collected in
@@ -39,36 +83,21 @@ func ParseJudgmentReport(md string) (JudgmentReport, error) {
 	lines := strings.Split(md, "\n")
 
 	var (
-		changeVal        string
-		roundVal         int
-		roundParsed      bool
-		judges           []string
-		implementor      string
-		datePresent      bool
-		verdict          string
-		rawVerdictLine   string
-		judgmentLineCount int
+		changeVal   string
+		roundVal    int
+		roundParsed bool
+		judges      []string
+		implementor string
+		datePresent bool
 	)
 
+	// --- Pass 1: collect header fields ----------------------------------------
+	// We do NOT look for JUDGMENT: lines here. Header parsing is independent of
+	// the verdict line so that prose mentioning "JUDGMENT:" cannot inject a verdict.
 	for _, raw := range lines {
 		line := strings.TrimRight(raw, "\r")
 		trimmed := strings.TrimSpace(line)
 
-		// Terminal verdict line — must start with "JUDGMENT:".
-		if strings.HasPrefix(trimmed, "JUDGMENT:") {
-			judgmentLineCount++
-			rawVerdictLine = trimmed
-			after := strings.TrimSpace(trimmed[len("JUDGMENT:"):])
-			// Strip trailing emoji characters (multi-byte; use field split).
-			fields := strings.Fields(after)
-			if len(fields) == 0 {
-				return JudgmentReport{}, &ErrMalformedJudgment{Detail: "JUDGMENT: line has no verdict token"}
-			}
-			verdict = fields[0] // "APPROVED" or "ESCALATED"
-			continue
-		}
-
-		// Header field lines: **Field:** value
 		if key, val, ok := parseHeaderField(trimmed); ok {
 			switch key {
 			case "Change":
@@ -92,14 +121,52 @@ func ParseJudgmentReport(md string) (JudgmentReport, error) {
 		}
 	}
 
-	// Enforce exactly one JUDGMENT: line (REQ-ARTIFACT-4).
-	if judgmentLineCount > 1 {
-		return JudgmentReport{}, &ErrMalformedJudgment{
-			Detail: fmt.Sprintf("multiple JUDGMENT: lines found (%d); expected exactly one", judgmentLineCount),
+	// --- Pass 2: locate the last non-empty line and enforce strict verdict rules -
+	//
+	// Two constraints (REQ-ARTIFACT-4, C2 hardening):
+	//   A) The last non-empty line MUST be a strict verdict line.
+	//   B) There MUST be exactly ONE strict verdict line in the entire document.
+	//      More than one → malformed (prevents decoy+real dual-line bypass).
+	//
+	// "Non-empty" = raw line (after stripping \r) has at least one non-whitespace
+	// character. The regex is applied to the raw line (not TrimSpace) so that
+	// any leading whitespace disqualifies the match (column-0 requirement).
+	lastNonEmpty := ""
+	strictVerdictCount := 0
+	for _, raw := range lines {
+		line := strings.TrimRight(raw, "\r")
+		if strings.TrimSpace(line) != "" {
+			lastNonEmpty = line
+		}
+		if _, ok := isStrictVerdictLine(line); ok {
+			strictVerdictCount++
 		}
 	}
 
-	// Validate required fields.
+	// Constraint B: exactly one strict verdict line.
+	if strictVerdictCount > 1 {
+		return JudgmentReport{}, &ErrMalformedJudgment{
+			Detail: fmt.Sprintf(
+				"multiple strict JUDGMENT verdict lines found (%d); expected exactly one",
+				strictVerdictCount,
+			),
+		}
+	}
+
+	// Constraint A: last non-empty line must be the verdict.
+	rawVerdictLine := lastNonEmpty
+	verdict, ok := isStrictVerdictLine(rawVerdictLine)
+	if !ok {
+		return JudgmentReport{}, &ErrMalformedJudgment{
+			Detail: fmt.Sprintf(
+				"last non-empty line %q is not a valid JUDGMENT verdict; "+
+					"must be exactly 'JUDGMENT: APPROVED' or 'JUDGMENT: ESCALATED' (optional emoji suffix, column 0)",
+				rawVerdictLine,
+			),
+		}
+	}
+
+	// --- Validate header fields -----------------------------------------------
 	if changeVal == "" {
 		return JudgmentReport{}, &ErrMalformedJudgment{Detail: "missing required field: Change"}
 	}
@@ -120,16 +187,8 @@ func ParseJudgmentReport(md string) (JudgmentReport, error) {
 	if !datePresent {
 		return JudgmentReport{}, &ErrMalformedJudgment{Detail: "missing required field: Date"}
 	}
-	if verdict == "" {
-		return JudgmentReport{}, &ErrMalformedJudgment{Detail: "missing terminal JUDGMENT: line"}
-	}
-	if verdict != "APPROVED" && verdict != "ESCALATED" {
-		return JudgmentReport{}, &ErrMalformedJudgment{
-			Detail: fmt.Sprintf("unrecognised verdict %q; must be APPROVED or ESCALATED", verdict),
-		}
-	}
 
-	// Collect O-1 surface violations (non-fatal in v1).
+	// --- O-1 surface violations (non-fatal in v1) -----------------------------
 	var violations []string
 	if len(judges) != 2 {
 		violations = append(violations, fmt.Sprintf("expected 2 judges, got %d", len(judges)))

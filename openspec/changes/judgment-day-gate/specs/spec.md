@@ -203,55 +203,70 @@ En v1 estas son advertencias de superficie; NO son hard-fail.
 
 ## REQ-CI-GATE — Job `judgment` en CI
 
+> **Revised post Judgment Day Round 1 (C1/C3 hardening)**: The gate is now archive-scoped.
+> It fires ONLY when the PR diff includes paths under `openspec/changes/archive/<date>-<slug>/`.
+> Feature PRs exit 0 (notice) — this is correct, not a bypass. HG5 is pre-archive; feature PRs
+> do not require a judgment report.
+
 ### REQ-CI-GATE-1: Job `judgment` declarado en `pr-checks.yml`
 
 **Given** un PR abierto contra `develop`,
 **When** el workflow `pr-checks` se ejecuta,
 **Then** MUST existir un job llamado `judgment` en `.github/workflows/pr-checks.yml`.
 
-### REQ-CI-GATE-2: Activación condicional — el PR toca un change activo
+### REQ-CI-GATE-2: Activación condicional — el PR es un archive PR
 
 **Given** el job `judgment` corre,
-**When** el diff del PR modifica al menos un archivo bajo `openspec/changes/<slug>/` (excluyendo
-`openspec/changes/archive/`),
-**Then** el job MUST correr `ch judgment --change <slug>` para cada change activo detectado en el
-diff.
+**When** el diff del PR modifica al menos un archivo bajo `openspec/changes/archive/<date>-<slug>/`,
+**Then** el job MUST correr `ch judgment --change <slug> --report openspec/changes/archive/<date>-<slug>/judgment-report.md`
+para cada archived change folder detectada en el diff. El `<slug>` se obtiene eliminando el prefijo
+`YYYY-MM-DD-` de `<date>-<slug>`.
 
-### REQ-CI-GATE-3: N/A cuando el PR no toca ningún change activo
+### REQ-CI-GATE-3: N/A cuando el PR no es un archive PR
 
 **Given** el job `judgment` corre,
-**When** el diff del PR no modifica ningún archivo bajo `openspec/changes/` (o sólo toca
-`openspec/changes/archive/`),
-**Then** el job MUST retornar exit 0 sin ejecutar `ch judgment`.
-Esto asegura que PRs de infraestructura, docs u otras áreas no sean bloqueados por el gate.
+**When** el diff del PR no modifica ningún archivo bajo `openspec/changes/archive/`,
+**Then** el job MUST retornar exit 0 con un notice `"Not an archive PR — HG5 judgment gate N/A"`.
+Esto asegura que PRs de features, infraestructura, docs u otras áreas no sean bloqueados por el
+gate. Este exit 0 es CORRECTO — no es un bypass.
 
 ### REQ-CI-GATE-4: Rojo ante report faltante o no-APPROVED
 
-**Given** el job `judgment` detecta un change activo en el diff,
-**When** `ch judgment --change <slug>` retorna exit 1 (report faltante, malformado, o ESCALATED),
+**Given** el job `judgment` detecta un archive folder en el diff,
+**When** `ch judgment --change <slug> --report <path>` retorna exit 1
+(report faltante, malformado, o ESCALATED),
 **Then** el job MUST fallar (exit 1) y el PR MUST quedar rojo.
 
 ### REQ-CI-GATE-5: Verde ante APPROVED
 
-**Given** el job `judgment` detecta un change activo en el diff,
-**When** `ch judgment --change <slug>` retorna exit 0 (veredicto APPROVED),
+**Given** el job `judgment` detecta un archive folder en el diff,
+**When** `ch judgment --change <slug> --report <path>` retorna exit 0 (veredicto APPROVED),
 **Then** el job MUST pasar (exit 0) y no bloquear el merge.
 
 ### REQ-CI-GATE-6: Jobs existentes siguen verdes (aditividad)
 
-**Given** el job `judgment` se añade al workflow,
+**Given** el job `judgment` existe en el workflow,
 **When** cualquier PR pasa por `pr-checks`,
 **Then** los jobs `branch-name`, `labels`, y `dod` MUST seguir comportándose de forma idéntica
 al estado anterior a este change. El change es aditivo: no modifica la lógica de ningún job
 existente.
 
-### REQ-CI-GATE-7: Derivación del slug desde el diff
+### REQ-CI-GATE-7: Derivación del slug desde el diff (archive-scoped)
 
-**Given** el job `judgment` necesita determinar qué changes están presentes en el diff,
+**Given** el job `judgment` necesita determinar qué changes archivados están presentes en el diff,
 **When** el job procesa el diff del PR,
-**Then** MUST usar `ch changed-modules` (o lógica equivalente ya presente en el job `dod`) para
-derivar el slug desde los paths modificados del diff. El slug MUST corresponder al segmento
-`openspec/changes/<slug>/` y MUST excluir el prefijo `archive/`.
+**Then** MUST buscar paths que coincidan con `^openspec/changes/archive/[^/]+/`, extraer el
+folder name `<date>-<slug>`, eliminar el prefijo `YYYY-MM-DD-` para obtener `<slug>`, y construir
+el `--report` path como `openspec/changes/archive/<date>-<slug>/judgment-report.md`.
+
+### REQ-CI-GATE-8: Flag `--report` en `ch judgment`
+
+**Given** `ch judgment` se ejecuta con el flag `--report <path>`,
+**When** el flag está presente,
+**Then** `ch judgment` MUST leer el archivo en `<path>` en lugar de derivar
+`<changes-dir>/<slug>/judgment-report.md`. El flag `--change` sigue siendo usado para
+validar el campo `**Change:**` del header (defense-in-depth). Un `<path>` inexistente MUST
+causar exit 1 con `ErrNoJudgmentReport`.
 
 ---
 

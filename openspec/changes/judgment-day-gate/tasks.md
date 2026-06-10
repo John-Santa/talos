@@ -4,7 +4,7 @@
 **Branch:** `agent/hermes/TAL-A` (A1) → stacked A2 → independent A3
 **Store:** hybrid (`openspec/changes/judgment-day-gate/tasks.md` + engram `sdd/judgment-day-gate/tasks`)
 **TDD mode:** Strict — RED before GREEN, L1 domain → L2 cmd → L3 CI.
-**Status: A1 DONE — A2, A3 PENDING**
+**Status: A1 + A2 DONE — A3 PENDING**
 
 ---
 
@@ -41,9 +41,9 @@ Chain strategy: stacked-to-main
 | PR | Tasks | Status |
 |----|-------|--------|
 | A1 | 17 | DONE |
-| A2 | 5 | PENDING |
+| A2 | 5 | DONE |
 | A3 | 3 | PENDING |
-| **Total** | **25** | **8/25 DONE** |
+| **Total** | **25** | **22/25 DONE** |
 
 ### Strict TDD Layer Order
 
@@ -146,7 +146,7 @@ Within each layer: `_test.go` (RED) written first → implementation (GREEN) →
 > **Files:** `.github/workflows/pr-checks.yml` (modify), `openspec/config.yaml` (modify), `openspec/changes/judgment-day-gate/judgment-report.md` (create — D-5)
 > **REQ-IDs:** REQ-CI-GATE-1..7, REQ-ARCHIVE-RULE-1..3
 
-- [ ] **A2-1 — CI job `judgment`** · `.github/workflows/pr-checks.yml`
+- [x] **A2-1 — CI job `judgment`** · `.github/workflows/pr-checks.yml`
   Add job `judgment` mirroring `dod` job structure:
   ```yaml
   judgment:
@@ -186,7 +186,7 @@ Within each layer: `_test.go` (RED) written first → implementation (GREEN) →
   Verify existing jobs `branch-name`, `labels`, `dod` are untouched (REQ-CI-GATE-6).
   _REQ-CI-GATE-1..7_
 
-- [ ] **A2-2 — `rules.archive` block** · `openspec/config.yaml`
+- [x] **A2-2 — `rules.archive` block** · `openspec/config.yaml`
   Append additive block after `paths:` section:
   ```yaml
   rules:
@@ -198,14 +198,14 @@ Within each layer: `_test.go` (RED) written first → implementation (GREEN) →
   ```
   _REQ-ARCHIVE-RULE-1..3_
 
-- [ ] **A2-3 — Dog-food bootstrap (D-5)** · `openspec/changes/judgment-day-gate/judgment-report.md`
+- [x] **A2-3 — Dog-food bootstrap (D-5)** · `openspec/changes/judgment-day-gate/judgment-report.md`
   **[GATE: ZEUS pre-open-PR]** Generate and commit the `judgment-report.md` for this very change on the implementor branch BEFORE opening PR A2. File must have header (`Change: judgment-day-gate`, `Round: 1`, `Judges: ARGOS-1, ARGOS-2`, `Implementor: HERMES`, `Date: <review-date>`) and terminal line `JUDGMENT: APPROVED ✅`. The CI `judgment` job must pass green on A2's own PR — gate proves itself. ZEUS approves before opening PR.
   _D-5, REQ-ARTIFACT-1..4_
 
-- [ ] **A2-4 — Smoke-test A2 gate locally**
+- [x] **A2-4 — Smoke-test A2 gate locally**
   On the A2 branch, run: `/tmp/ch judgment --change judgment-day-gate` → exit 0. Confirms dog-food bootstrap is valid before pushing.
 
-- [ ] **A2-5 — Verify PR A2** (gate task)
+- [x] **A2-5 — Verify PR A2** (gate task)
   `cd platform/ci-checks && go test ./...` → PASS (A1 code still green). PR A2 CI is green including the new `judgment` job. `openspec/changes/judgment-day-gate/judgment-report.md` present and APPROVED in diff.
 
 ---
@@ -240,14 +240,14 @@ Within each layer: `_test.go` (RED) written first → implementation (GREEN) →
 
 ## Completion Checklist
 
-**Status: A1 DONE — A2, A3 PENDING**
+**Status: A1 + A2 DONE — A3 PENDING**
 
 - [x] `cd platform/ci-checks && go test ./...` → PASS (0 FAIL) — domain + cmd all green
 - [x] `go build -o /dev/null ./cmd/ch` in `platform/ci-checks` compiles cleanly
-- [ ] `ch judgment --change judgment-day-gate` → exit 0 (with dog-food `judgment-report.md`)
-- [ ] `.github/workflows/pr-checks.yml` has `judgment` job; existing jobs untouched
-- [ ] `openspec/config.yaml` has `rules.archive` block
-- [ ] `openspec/changes/judgment-day-gate/judgment-report.md` present and APPROVED (D-5)
+- [x] `ch judgment --change judgment-day-gate` → exit 0 (with dog-food `judgment-report.md`)
+- [x] `.github/workflows/pr-checks.yml` has `judgment` job; existing jobs untouched
+- [x] `openspec/config.yaml` has `rules.archive` block
+- [x] `openspec/changes/judgment-day-gate/judgment-report.md` present and APPROVED (D-5)
 - [ ] `team-context/judgment-day.md` exists with required content
 - [ ] `team-context/ownership.md` second table has `judgment-day.md` row
 - [ ] PR A1 open and green; PR A2 stacked on A1 and green (self-gated); PR A3 open independently and green
