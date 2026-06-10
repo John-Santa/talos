@@ -7,12 +7,14 @@ package gitfs
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/John-Santa/talos/platform/webapi/domain"
 )
@@ -20,15 +22,23 @@ import (
 // gitRunner runs `git -C <dir> <args...>` and returns stdout. Injectable for tests.
 type gitRunner func(ctx context.Context, dir string, args ...string) ([]byte, error)
 
+// chRunner runs an external command and returns stdout. Injectable for tests.
+type chRunner func(ctx context.Context, name string, args ...string) ([]byte, error)
+
 func execGit(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	full := append([]string{"-C", dir}, args...)
 	return exec.CommandContext(ctx, "git", full...).Output()
 }
 
+func execCh(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, name, args...).Output()
+}
+
 type Reader struct {
-	root string
-	base string
-	run  gitRunner
+	root  string
+	base  string
+	run   gitRunner
+	chRun chRunner
 }
 
 // New builds a Reader for the given repo root (base defaults to "develop").
@@ -36,7 +46,7 @@ func New(root, base string) *Reader {
 	if base == "" {
 		base = "develop"
 	}
-	return &Reader{root: root, base: base, run: execGit}
+	return &Reader{root: root, base: base, run: execGit, chRun: execCh}
 }
 
 // NewAutodetect resolves the repo root from the current working directory.
@@ -315,6 +325,26 @@ func (r *Reader) mergeTreeConflict(ctx context.Context, base, branch string) (co
 		return files, false
 	}
 	return nil, true
+}
+
+// Labels calls `ch labels --branch <branch> --json` with a short timeout and
+// returns the parsed result. This is the ONLY method in this package that
+// invokes an external binary other than git. It degrades gracefully: if ch is
+// absent, exits non-zero, or returns malformed JSON the method returns an empty
+// ChLabels without an error, so callers always get a best-effort result.
+func (r *Reader) Labels(ctx context.Context, branch string) (domain.ChLabels, error) {
+	tctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	out, err := r.chRun(tctx, "ch", "labels", "--branch", branch, "--json")
+	if err != nil {
+		// ch absent or failed — degrade cleanly, no error returned.
+		return domain.ChLabels{}, nil
+	}
+	var cl domain.ChLabels
+	if err := json.Unmarshal(out, &cl); err != nil {
+		return domain.ChLabels{}, nil
+	}
+	return cl, nil
 }
 
 // Merge merges the worktree's branch into base, guarded by a non-destructive

@@ -38,6 +38,10 @@ func (fakeReader) Ownership(context.Context) (map[string]string, error) {
 
 func (fakeReader) Ready(context.Context) error { return nil }
 
+func (fakeReader) Labels(_ context.Context, _ string) (domain.ChLabels, error) {
+	return domain.ChLabels{}, nil
+}
+
 func (fakeReader) CreateWorktree(context.Context, string, string) error { return nil }
 func (fakeReader) TeardownWorktree(context.Context, string) error       { return nil }
 func (fakeReader) Merge(_ context.Context, figura, jiraKey string) error {

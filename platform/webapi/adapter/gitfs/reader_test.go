@@ -2,12 +2,15 @@ package gitfs
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/John-Santa/talos/platform/webapi/domain"
 )
 
 // fakeRunner records git invocations and returns canned output, so write
@@ -272,6 +275,59 @@ func TestMergeTreeConflictCleanPair(t *testing.T) {
 	}
 	if len(files) != 0 {
 		t.Errorf("expected no conflict files, got %v", files)
+	}
+}
+
+// --- PR3: Labels() with fakeChRunner -----------------------------------------
+
+// fakeChRunner stubs the chRunner function injected into Reader for ch-based ops.
+type fakeChRunner struct {
+	output []byte
+	err    error
+}
+
+func (f *fakeChRunner) run(_ context.Context, _ string, _ ...string) ([]byte, error) {
+	return f.output, f.err
+}
+
+func TestLabelsReturnsParsedChOutput(t *testing.T) {
+	cl := domain.ChLabels{
+		Branch:     "agent/iris/TAL-42",
+		JiraKey:    "TAL-42",
+		Figura:     "iris",
+		Verdict:    "ok",
+		Labels:     []string{"ci:green", "pr:merged"},
+		Violations: []string{},
+	}
+	data, err := json.Marshal(cl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := New("/repo", "develop")
+	r.chRun = func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+		return data, nil
+	}
+	got, err := r.Labels(context.Background(), "agent/iris/TAL-42")
+	if err != nil {
+		t.Fatalf("Labels error: %v", err)
+	}
+	if got.JiraKey != "TAL-42" || len(got.Labels) != 2 {
+		t.Errorf("Labels = %+v, want TAL-42 with 2 labels", got)
+	}
+}
+
+func TestLabelsFallbackWhenChNotFound(t *testing.T) {
+	r := New("/repo", "develop")
+	// Simulate ch binary not found (exec.ErrNotFound or any error)
+	r.chRun = func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+		return nil, fmt.Errorf("exec: ch: not found")
+	}
+	got, err := r.Labels(context.Background(), "agent/iris/TAL-42")
+	if err != nil {
+		t.Errorf("Labels should not return error on ch absence, got: %v", err)
+	}
+	if len(got.Labels) != 0 || len(got.Violations) != 0 {
+		t.Errorf("Labels fallback should return empty ChLabels, got %+v", got)
 	}
 }
 
