@@ -27,7 +27,7 @@
 │                                                                                                │
 │                                                                                                │
 └────────────────────────────────────────────────────────────────────────────────────────────────┘
-                      
-k/↑ up      tab layout
-j/↓ down    ?   help  
-            q   quit  
+                                  
+k/↑ up        n new         ? help
+j/↓ down      x teardown    q quit
+tab layout    m merge             

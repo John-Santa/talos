@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -64,8 +65,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.Toast = "✓ teardown complete"
 		}
-		// Trigger a snapshot reload to reflect the updated worktree state.
-		return m, loadSnapshot(m.agg)
+		// Bump the sequence so any previously-armed dismiss timer is invalidated.
+		m.ToastSeq++
+		seq := m.ToastSeq
+		// Schedule auto-dismiss and trigger a snapshot reload.
+		dismissCmd := tea.Tick(toastDuration, func(time.Time) tea.Msg {
+			return ToastDismissMsg{Seq: seq}
+		})
+		return m, tea.Batch(loadSnapshot(m.agg), dismissCmd)
+
+	// ─── Toast auto-dismiss ───────────────────────────────────────────────────
+	case ToastDismissMsg:
+		// Only clear the toast when the seq matches — stale timers are no-ops.
+		if msg.Seq == m.ToastSeq {
+			m.Toast = ""
+		}
+		return m, nil
 
 	// ─── Async data loaded ────────────────────────────────────────────────────
 	case SnapshotMsg:
