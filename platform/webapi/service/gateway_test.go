@@ -118,8 +118,14 @@ func TestGatewayJudgmentMinimal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rev.JiraKey != "TAL-15" || rev.Verdict != "agree" {
-		t.Errorf("judgment = %+v, want minimal agree", rev)
+	if rev.JiraKey != "TAL-15" {
+		t.Errorf("judgment.JiraKey = %q, want TAL-15", rev.JiraKey)
+	}
+	if !rev.Pending {
+		t.Errorf("judgment.Pending = false, want true (no ch source available)")
+	}
+	if rev.Verdict != "pending" {
+		t.Errorf("judgment.Verdict = %q, want \"pending\" (must not fabricate \"agree\")", rev.Verdict)
 	}
 }
 
