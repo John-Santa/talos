@@ -19,10 +19,12 @@ import (
 	"strings"
 
 	"github.com/John-Santa/talos/platform/overlap-guard/adapter/gitcli"
+	"github.com/John-Santa/talos/platform/overlap-guard/adapter/gitremote"
 	"github.com/John-Santa/talos/platform/overlap-guard/adapter/jirarest"
 	"github.com/John-Santa/talos/platform/overlap-guard/adapter/wtcli"
 	"github.com/John-Santa/talos/platform/overlap-guard/domain/overlap"
 	"github.com/John-Santa/talos/platform/overlap-guard/internal/envfile"
+	"github.com/John-Santa/talos/platform/overlap-guard/port"
 	"github.com/John-Santa/talos/platform/overlap-guard/service"
 )
 
@@ -333,6 +335,7 @@ func cmdScan(args []string) error {
 	base := fs.String("base", "develop", "Integration base branch")
 	wtBin := fs.String("wt-bin", "wt", "wt binary name on PATH")
 	noFetch := fs.Bool("no-fetch", false, "Skip initial fetch")
+	remote := fs.Bool("remote", false, "Detect collisions via real diffs of remote agent/* branches (CI-friendly, no worktrees)")
 	jsonOut := fs.Bool("json", false, "Output as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -349,7 +352,14 @@ func cmdScan(args []string) error {
 	}
 
 	inspector := gitcli.NewInspector(root)
-	lister := wtcli.NewLister(*wtBin)
+
+	var lister port.WorktreeLister
+	if *remote {
+		lister = gitremote.NewLister(root)
+	} else {
+		lister = wtcli.NewLister(*wtBin)
+	}
+
 	guard := service.NewGuard(nil, lister, inspector, cfg)
 
 	ctx := context.Background()

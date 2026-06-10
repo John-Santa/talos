@@ -186,6 +186,35 @@ func TestCmdMetric_RequiresNoArgsForHelp(t *testing.T) {
 	_ = err
 }
 
+// TAL-16: scan --remote flag must be recognised — if the flag is not declared,
+// flag.Parse returns an error containing "flag provided but not defined".
+// This test FAILS (RED) until --remote is wired into cmdScan.
+func TestRun_ScanRemote_FlagMustBeDeclared(t *testing.T) {
+	// --no-fetch is set to avoid real network; --remote must not return a flag-parse error.
+	err := run([]string{"scan", "--remote", "--no-fetch", "--base", "develop"})
+	// If --remote is undeclared, flag.Parse returns an error containing "flag provided but not defined".
+	if err != nil && strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("--remote flag not declared in cmdScan: %v", err)
+	}
+	// Any other error (e.g. git not available) is acceptable — only flag-parse failure is prohibited.
+}
+
+// TAL-16: scan --remote --json flag combination is recognised without flag-parse error.
+func TestRun_ScanRemote_JSON_FlagRecognised(t *testing.T) {
+	err := run([]string{"scan", "--remote", "--no-fetch", "--json"})
+	if err != nil && strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("--remote or --json flag not declared in cmdScan: %v", err)
+	}
+}
+
+// TAL-16: scan --remote does not accept unknown flags.
+func TestRun_ScanRemote_UnknownFlag_ReturnsError(t *testing.T) {
+	err := run([]string{"scan", "--remote", "--unknown-flag-xyz"})
+	if err == nil {
+		t.Fatal("expected error for unknown flag, got nil")
+	}
+}
+
 // W-01 RED: advisory emitted when issue has no checklist — visible in JSON output.
 func TestReportToCheckJSON_AdvisoriesFromReport(t *testing.T) {
 	t.Parallel()
