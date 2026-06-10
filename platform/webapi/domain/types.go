@@ -17,11 +17,12 @@ type Worktree struct {
 
 // MergeItem is one ordered step in the merge plan.
 type MergeItem struct {
-	N       int    `json:"n"`
-	Agent   string `json:"agent"`
-	JiraKey string `json:"jiraKey"`
-	Ahead   int    `json:"ahead"`
-	Ready   bool   `json:"ready"`
+	N             int      `json:"n"`
+	Agent         string   `json:"agent"`
+	JiraKey       string   `json:"jiraKey"`
+	Ahead         int      `json:"ahead"`
+	Ready         bool     `json:"ready"`
+	ConflictFiles []string `json:"conflictFiles,omitempty"`
 }
 
 // MergeOrder is the merge plan toward the base branch.
@@ -40,9 +41,11 @@ type Pairs struct {
 
 // Overlap is the collision verdict across active worktrees.
 type Overlap struct {
-	CollisionRate float64 `json:"collisionRate"`
-	Pairs         Pairs   `json:"pairs"`
-	Verdict       string  `json:"verdict"`
+	CollisionRate  float64  `json:"collisionRate"`
+	Pairs          Pairs    `json:"pairs"`
+	Verdict        string   `json:"verdict"`
+	FileCollisions []string `json:"fileCollisions,omitempty"`
+	Advisories     []string `json:"advisories,omitempty"`
 }
 
 // Gate is an approval gate (HG0..HG7).
@@ -113,4 +116,7 @@ type JudgmentReview struct {
 	FixAgent   string  `json:"fixAgent"`
 	Verdict    string  `json:"verdict"`
 	EscalateTo string  `json:"escalateTo,omitempty"`
+	// Pending is true when the judgment source (ch/Jira) is unavailable.
+	// The front must not render a positive verdict when Pending is set.
+	Pending bool `json:"pending,omitempty"`
 }

@@ -16,6 +16,9 @@ type PlatformReader interface {
 	Ownership(ctx context.Context) (map[string]string, error)
 	// Ready reports whether the underlying repo/tooling is usable (for /readyz).
 	Ready(ctx context.Context) error
+	// Labels calls `ch labels --branch <branch> --json` (best-effort).
+	// If the ch binary is absent or fails, returns an empty ChLabels without error.
+	Labels(ctx context.Context, branch string) (domain.ChLabels, error)
 }
 
 // PlatformWriter performs worktree write actions (native git, no binaries).
