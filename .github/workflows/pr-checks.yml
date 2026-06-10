@@ -61,9 +61,14 @@ jobs:
               (cd "$dir" && go test -short ./...)
             fi
           done
-      - name: Vitest placeholder (frontend — TODO Fase 5+)
+      - name: Vitest (talos-front — separate repo, runs in its own CI)
         run: |
-          echo "vitest: no frontend changes detected or not yet wired"
+          # talos-front lives in a separate repository (github.com/jsanta/talos-front) and
+          # runs its own CI workflow (.github/workflows/ci.yml) that executes typecheck,
+          # lint, and vitest on every push/PR to main.
+          # This step is intentionally a no-op in the talos repo — cross-repo test coverage
+          # is enforced by the talos-front CI, not here.
+          echo "talos-front CI is wired in the talos-front repository — see its .github/workflows/ci.yml"
       - name: Assert verify-report present for touched change(s)
         run: |
           # Derive the change folder(s) this PR touches — active or archived — and
