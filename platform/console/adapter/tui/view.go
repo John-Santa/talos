@@ -16,6 +16,8 @@ func (m Model) View() string {
 	switch m.Layout {
 	case LayoutOverview:
 		return m.viewOverview()
+	case LayoutHybrid:
+		return m.viewHybrid()
 	default:
 		return m.viewWorktreeList()
 	}
@@ -295,6 +297,97 @@ func (m Model) renderOverlapPanel(w, h int) string {
 	}
 
 	return m.panelStyle(w, h).Render(b.String())
+}
+
+// ─── Hybrid layout ────────────────────────────────────────────────────────────
+
+// viewHybrid renders the Hybrid layout:
+//
+//	┌─────────────────────────────────────────────────────────────────────────┐
+//	│ TALOS — Hybrid                                                           │
+//	├──────────────────────┬──────────────────────┬──────────────────────────┤
+//	│ Worktrees            │ Merge (compact)       │ Overlap (compact)        │
+//	├──────────────────────┴──────────────────────┴──────────────────────────┤
+//	│ Detail: <selected worktree>  branch · head · status                     │
+//	├─────────────────────────────────────────────────────────────────────────┤
+//	│ help bar                                                                 │
+//	└─────────────────────────────────────────────────────────────────────────┘
+//
+// The top row reuses the overview panel helpers; the detail pane reuses the
+// master-detail row renderer. Heights are split so the detail pane takes ~⅓.
+func (m Model) viewHybrid() string {
+	var b strings.Builder
+
+	// Header.
+	title := m.Theme.Header.Width(m.effectiveWidth()).Render("  TALOS — Hybrid")
+	b.WriteString(title)
+	b.WriteString("\n")
+
+	total := m.effectiveWidth()
+	colW := total / 3
+	col1W := total - colW*2
+
+	// Reserve space: header(3) + detail-panel(~7) + footer(2) + newline(1).
+	const detailPanelHeight = 7
+	topPanelHeight := m.hybridTopPanelHeight(detailPanelHeight)
+
+	// Top row — three compact panels (same as overview but shorter).
+	left := m.renderWorktreesPanel(col1W, topPanelHeight)
+	mid := m.renderMergePlanPanel(colW, topPanelHeight)
+	right := m.renderOverlapPanel(colW, topPanelHeight)
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, left, mid, right))
+	b.WriteString("\n")
+
+	// Detail pane for the currently-selected worktree.
+	b.WriteString(m.renderSelectedDetail(total, detailPanelHeight))
+	b.WriteString("\n")
+
+	// Dynamic help bar.
+	b.WriteString(m.renderHelpBar())
+
+	return b.String()
+}
+
+// hybridTopPanelHeight computes the height for the top overview panels.
+func (m Model) hybridTopPanelHeight(detailH int) int {
+	const reserved = 6 // header(3) + footer(2) + newline(1)
+	h := m.Height - reserved - detailH
+	if h < 4 {
+		return 8 // safe fallback
+	}
+	return h
+}
+
+// renderSelectedDetail renders a bordered detail pane for the currently-selected
+// worktree. If the list is empty it shows a placeholder.
+func (m Model) renderSelectedDetail(width, height int) string {
+	var b strings.Builder
+	b.WriteString(m.panelTitle("Selected Worktree"))
+	b.WriteString("\n")
+
+	wts := m.Snap.Worktrees
+	if len(wts) == 0 || m.Cursor >= len(wts) {
+		b.WriteString(m.Theme.Subtle.Render("(no worktree selected)"))
+	} else {
+		wt := wts[m.Cursor]
+		// Branch line.
+		b.WriteString(m.Theme.Badge.Render("branch  "))
+		b.WriteString(m.Theme.ListItem.Render(wt.Branch))
+		b.WriteString("\n")
+		// Head line.
+		b.WriteString(m.Theme.Badge.Render("head    "))
+		b.WriteString(m.Theme.Subtle.Render(shortHead(wt.Head)))
+		b.WriteString("\n")
+		// Status line.
+		b.WriteString(m.Theme.Badge.Render("status  "))
+		b.WriteString(m.renderStatus(wt.Status))
+		b.WriteString("\n")
+		// Figura line.
+		b.WriteString(m.Theme.Badge.Render("figura  "))
+		b.WriteString(m.Theme.ListItem.Render(wt.Figura))
+	}
+
+	return m.panelStyle(width, height).Render(b.String())
 }
 
 // ─── String helpers ───────────────────────────────────────────────────────────

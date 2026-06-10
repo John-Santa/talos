@@ -21,7 +21,7 @@ func main() {
 	agg := service.NewAggregator(reader)
 	m := tui.New(agg)
 
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "talos: %v\n", err)
 		os.Exit(1)

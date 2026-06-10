@@ -233,35 +233,147 @@ func TestUpdate_TabKey_TogglesLayoutToOverview(t *testing.T) {
 	}
 }
 
-func TestUpdate_TabKey_WrapsBackToMasterDetail(t *testing.T) {
-	// Triangulate: a second Tab from Overview wraps back to MasterDetail.
+func TestUpdate_TabKey_CyclesToHybrid(t *testing.T) {
+	// Triangulate: a second Tab from Overview advances to Hybrid.
 	m := newModel(nil)
 
-	m = sendKeyType(m, tea.KeyTab)
+	m = sendKeyType(m, tea.KeyTab) // → Overview
 	if m.Layout != tui.LayoutOverview {
 		t.Fatalf("after first Tab: Layout = %v, want LayoutOverview", m.Layout)
 	}
 
-	m = sendKeyType(m, tea.KeyTab)
+	m = sendKeyType(m, tea.KeyTab) // → Hybrid
+	if m.Layout != tui.LayoutHybrid {
+		t.Errorf("after second Tab: Layout = %v, want LayoutHybrid", m.Layout)
+	}
+}
+
+func TestUpdate_TabKey_WrapsBackToMasterDetail(t *testing.T) {
+	// Triangulate: a third Tab from Hybrid wraps back to MasterDetail.
+	m := newModel(nil)
+
+	m = sendKeyType(m, tea.KeyTab) // → Overview
+	m = sendKeyType(m, tea.KeyTab) // → Hybrid
+	if m.Layout != tui.LayoutHybrid {
+		t.Fatalf("after second Tab: Layout = %v, want LayoutHybrid", m.Layout)
+	}
+
+	m = sendKeyType(m, tea.KeyTab) // → MasterDetail (wrap)
 	if m.Layout != tui.LayoutMasterDetail {
-		t.Errorf("after second Tab: Layout = %v, want LayoutMasterDetail", m.Layout)
+		t.Errorf("after third Tab: Layout = %v, want LayoutMasterDetail", m.Layout)
 	}
 }
 
 func TestUpdate_TabKey_CyclesThreeTimes(t *testing.T) {
-	// Triangulate wrap-around over 3 presses.
+	// Triangulate full 3-way cycle: MasterDetail → Overview → Hybrid → MasterDetail.
 	m := newModel(nil)
 
 	sequence := []tui.LayoutMode{
 		tui.LayoutOverview,
+		tui.LayoutHybrid,
 		tui.LayoutMasterDetail,
-		tui.LayoutOverview,
 	}
 	for i, want := range sequence {
 		m = sendKeyType(m, tea.KeyTab)
 		if m.Layout != want {
 			t.Errorf("Tab press %d: Layout = %v, want %v", i+1, m.Layout, want)
 		}
+	}
+}
+
+// ─── (g) tick refresh ────────────────────────────────────────────────────────
+
+func TestUpdate_TickMsg_SetsRefreshingFlag(t *testing.T) {
+	// tickMsg should set Refreshing = true and return a non-nil cmd.
+	m := newModel(threeWorktrees())
+	snap := service.Snapshot{Worktrees: threeWorktrees()}
+	m = m.WithSnapshot(snap)
+
+	next, cmd := m.Update(tui.TickMsg{})
+	got := next.(tui.Model)
+
+	if !got.Refreshing {
+		t.Error("after tickMsg: Refreshing should be true")
+	}
+	if cmd == nil {
+		t.Error("after tickMsg: cmd should be non-nil (reload + re-arm)")
+	}
+}
+
+func TestUpdate_TickMsg_RearmsTick(t *testing.T) {
+	// Triangulate: a second tickMsg also returns non-nil cmd (tick keeps firing).
+	m := newModel(threeWorktrees())
+	snap := service.Snapshot{Worktrees: threeWorktrees()}
+	m = m.WithSnapshot(snap)
+
+	// First tick.
+	next, cmd := m.Update(tui.TickMsg{})
+	if cmd == nil {
+		t.Fatal("first tickMsg: cmd should be non-nil")
+	}
+	m = next.(tui.Model)
+
+	// Second tick.
+	_, cmd2 := m.Update(tui.TickMsg{})
+	if cmd2 == nil {
+		t.Error("second tickMsg: cmd should be non-nil (re-armed)")
+	}
+}
+
+// ─── (h) mouse: wheel and click ──────────────────────────────────────────────
+
+func TestUpdate_MouseWheelDown_MovesCursorDown(t *testing.T) {
+	wts := threeWorktrees()
+	m := newModel(wts)
+	snap := service.Snapshot{Worktrees: wts}
+	m = m.WithSnapshot(snap)
+
+	next, _ := m.Update(tea.MouseMsg{
+		Type:   tea.MouseWheelDown,
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonWheelDown,
+	})
+	got := next.(tui.Model)
+	if got.Cursor != 1 {
+		t.Errorf("wheel down: cursor = %d, want 1", got.Cursor)
+	}
+}
+
+func TestUpdate_MouseWheelUp_MovesCursorUp(t *testing.T) {
+	// Triangulate: start at 1, wheel up → 0.
+	wts := threeWorktrees()
+	m := newModel(wts)
+	snap := service.Snapshot{Worktrees: wts}
+	m = m.WithSnapshot(snap)
+	m = sendKey(m, "j") // cursor → 1
+
+	next, _ := m.Update(tea.MouseMsg{
+		Type:   tea.MouseWheelUp,
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonWheelUp,
+	})
+	got := next.(tui.Model)
+	if got.Cursor != 0 {
+		t.Errorf("wheel up: cursor = %d, want 0", got.Cursor)
+	}
+}
+
+func TestUpdate_SnapshotMsg_ClearsRefreshing(t *testing.T) {
+	// After a tickMsg sets Refreshing, the subsequent SnapshotMsg clears it.
+	m := newModel(threeWorktrees())
+	snap := service.Snapshot{Worktrees: threeWorktrees()}
+	m = m.WithSnapshot(snap)
+
+	next, _ := m.Update(tui.TickMsg{})
+	m = next.(tui.Model)
+	if !m.Refreshing {
+		t.Fatal("precondition: Refreshing should be true after tickMsg")
+	}
+
+	next2, _ := m.Update(tui.SnapshotMsg{Snap: snap})
+	got := next2.(tui.Model)
+	if got.Refreshing {
+		t.Error("Refreshing should be false after SnapshotMsg")
 	}
 }
 
