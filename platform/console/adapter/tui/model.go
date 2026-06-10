@@ -8,6 +8,7 @@ import (
 	"github.com/John-Santa/talos/platform/console/service"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -31,6 +32,18 @@ const (
 func cycleLayout(l LayoutMode) LayoutMode {
 	return (l + 1) % 3
 }
+
+// ─── Modal mode ───────────────────────────────────────────────────────────────
+
+// ModalMode distinguishes the type of modal currently displayed.
+type ModalMode int
+
+const (
+	// ModalModeConfirm is the yes/no confirmation dialog (e.g. teardown).
+	ModalModeConfirm ModalMode = iota
+	// ModalModeCreate is the text-input dialog for creating a new worktree.
+	ModalModeCreate
+)
 
 // ─── Key bindings ─────────────────────────────────────────────────────────────
 
@@ -143,17 +156,25 @@ type Model struct {
 	// ViewportYOffset exposes the current scroll offset for testing.
 	ViewportYOffset int
 
-	// ─── Confirmation modal ────────────────────────────────────────────────────
-	// ModalActive is true when the confirmation dialog is displayed.
+	// ─── Modal (shared) ────────────────────────────────────────────────────────
+	// ModalActive is true when any modal dialog is displayed.
 	ModalActive bool
-	// ModalTitle is the heading line of the confirmation dialog.
+	// ModalMode identifies which kind of modal is shown.
+	ModalMode ModalMode
+	// ModalTitle is the heading line of the modal.
 	ModalTitle string
-	// ModalMessage is the body text of the confirmation dialog.
+	// ModalMessage is the body text of the confirmation modal.
 	ModalMessage string
 	// modalFigura / modalJiraKey hold the teardown target captured when the
-	// modal was opened so confirm can dispatch the action.
+	// teardown modal was opened so confirm can dispatch the action.
 	modalFigura  string
 	modalJiraKey string
+
+	// ─── Create-worktree modal ─────────────────────────────────────────────────
+	// CreateFiguraInput is the text input for the agent figura (lowercase letters).
+	CreateFiguraInput textinput.Model
+	// CreateJiraKeyInput is the text input for the Jira issue key (TAL-NNN).
+	CreateJiraKeyInput textinput.Model
 
 	// ─── Toast ─────────────────────────────────────────────────────────────────
 	// Toast is the transient single-line notification shown after an action
@@ -176,14 +197,25 @@ func New(agg *service.Aggregator) Model {
 func NewWithActor(agg *service.Aggregator, actor port.PlatformActor) Model {
 	h := help.New()
 	h.ShowAll = false
+
+	figuraInput := textinput.New()
+	figuraInput.Placeholder = "figura (e.g. iris)"
+	figuraInput.CharLimit = 32
+
+	jiraKeyInput := textinput.New()
+	jiraKeyInput.Placeholder = "Jira key (e.g. TAL-19)"
+	jiraKeyInput.CharLimit = 20
+
 	return Model{
-		agg:       agg,
-		actor:     actor,
-		Theme:     RosePine(),
-		Loading:   true,
-		keys:      defaultKeyMap,
-		helpModel: h,
-		vp:        viewport.New(0, 0),
+		agg:                agg,
+		actor:              actor,
+		Theme:              RosePine(),
+		Loading:            true,
+		keys:               defaultKeyMap,
+		helpModel:          h,
+		vp:                 viewport.New(0, 0),
+		CreateFiguraInput:  figuraInput,
+		CreateJiraKeyInput: jiraKeyInput,
 	}
 }
 
