@@ -31,7 +31,7 @@ func (m Model) viewWorktreeList() string {
 	b.WriteString(title)
 	b.WriteString("\n")
 
-	// Body: the bordered list.
+	// Body: the bordered list (viewport-sliced).
 	b.WriteString(m.renderWorktreeRows())
 	b.WriteString("\n")
 
@@ -42,25 +42,34 @@ func (m Model) viewWorktreeList() string {
 		b.WriteString("\n")
 	}
 
-	// Footer hint.
-	b.WriteString(m.Theme.Footer.Render("  j/k move · q quit"))
+	// Dynamic help bar (replaces static footer string).
+	b.WriteString(m.renderHelpBar())
 
 	return b.String()
 }
 
-// renderWorktreeRows builds the bordered list of worktree rows.
+// renderHelpBar renders the bubbles/help bar, styled with the footer colour.
+func (m Model) renderHelpBar() string {
+	rendered := m.helpModel.View(m.keys)
+	return m.Theme.Footer.Render(rendered)
+}
+
+// renderWorktreeRows builds the bordered, viewport-windowed list of worktree rows.
 func (m Model) renderWorktreeRows() string {
 	wts := m.Snap.Worktrees
 	if len(wts) == 0 {
 		return m.Theme.Subtle.Render("  (no worktrees found)")
 	}
 
-	var rows []string
+	// Build all row strings first.
+	var allRows []string
 	for i, wt := range wts {
-		rows = append(rows, m.renderRow(i, wt))
+		allRows = append(allRows, m.renderRow(i, wt))
 	}
 
-	inner := strings.Join(rows, "\n")
+	// Slice to visible window.
+	inner := m.renderWorktreeViewport(allRows)
+
 	return lipgloss.NewStyle().
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderForeground(colorOverlay).
@@ -114,9 +123,9 @@ func (m Model) effectiveWidth() int {
 //
 //	[ Worktrees ] [ Merge Order ] [ Overlap ]
 //
-// followed by a shared footer. Panel widths are derived from Model.Width so
-// the layout stays responsive. Each panel degrades gracefully when its data
-// source has an error in Snap.Errors.
+// followed by the shared dynamic help bar. Panel widths are derived from
+// Model.Width so the layout stays responsive. Each panel degrades gracefully
+// when its data source has an error in Snap.Errors.
 func (m Model) viewOverview() string {
 	var b strings.Builder
 
@@ -141,8 +150,8 @@ func (m Model) viewOverview() string {
 	b.WriteString(row)
 	b.WriteString("\n")
 
-	// Footer.
-	b.WriteString(m.Theme.Footer.Render("  j/k move · tab layout · q quit"))
+	// Dynamic help bar.
+	b.WriteString(m.renderHelpBar())
 
 	return b.String()
 }
@@ -160,8 +169,8 @@ func (m Model) panelStyle(w, h int) lipgloss.Style {
 	return lipgloss.NewStyle().
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderForeground(colorOverlay).
-		Width(w - 2).   // -2 for border chars
-		Height(h - 2).  // -2 for border chars
+		Width(w - 2).  // -2 for border chars
+		Height(h - 2). // -2 for border chars
 		Padding(0, 1)
 }
 
