@@ -37,13 +37,47 @@ func (m Model) View() string {
 	return base
 }
 
+// ─── Header title helper ──────────────────────────────────────────────────────
+
+// headerTitle builds the header string for a given layout name.
+// When RepoLabel is set it renders as "TALOS · <label> · <layout>",
+// otherwise "TALOS — <layout>" (unchanged legacy form).
+func (m Model) headerTitle(layoutName string) string {
+	if m.RepoLabel != "" {
+		label := m.repoLabelDisplay(m.effectiveWidth())
+		return "  TALOS · " + label + " · " + layoutName
+	}
+	return "  TALOS — " + layoutName
+}
+
+// repoLabelDisplay truncates the repo label if the available width is narrow.
+// The threshold is generous: truncation only kicks in below 60 chars total width.
+func (m Model) repoLabelDisplay(availWidth int) string {
+	const minWidth = 60
+	const ellipsis = "…"
+	label := m.RepoLabel
+	// Reserve ~30 chars for the surrounding "  TALOS · " + " · <layout>" framing.
+	maxLabel := availWidth - 30
+	if availWidth >= minWidth || maxLabel <= 0 {
+		// Wide enough — show the full label (or no truncation needed).
+		if maxLabel <= 0 {
+			return label[:0] + ellipsis // degenerate: hide entirely except marker
+		}
+		return label
+	}
+	if len(label) > maxLabel {
+		return label[:maxLabel] + ellipsis
+	}
+	return label
+}
+
 // ─── Worktree list ────────────────────────────────────────────────────────────
 
 func (m Model) viewWorktreeList() string {
 	var b strings.Builder
 
 	// Header.
-	title := m.Theme.Header.Width(m.effectiveWidth()).Render("  TALOS — Worktree Monitor")
+	title := m.Theme.Header.Width(m.effectiveWidth()).Render(m.headerTitle("Worktree Monitor"))
 	b.WriteString(title)
 	b.WriteString("\n")
 
@@ -152,7 +186,7 @@ func (m Model) viewOverview() string {
 	var b strings.Builder
 
 	// Header — same style as MasterDetail.
-	title := m.Theme.Header.Width(m.effectiveWidth()).Render("  TALOS — Overview")
+	title := m.Theme.Header.Width(m.effectiveWidth()).Render(m.headerTitle("Overview"))
 	b.WriteString(title)
 	b.WriteString("\n")
 
@@ -339,7 +373,7 @@ func (m Model) viewHybrid() string {
 	var b strings.Builder
 
 	// Header.
-	title := m.Theme.Header.Width(m.effectiveWidth()).Render("  TALOS — Hybrid")
+	title := m.Theme.Header.Width(m.effectiveWidth()).Render(m.headerTitle("Hybrid"))
 	b.WriteString(title)
 	b.WriteString("\n")
 

@@ -214,6 +214,12 @@ type Model struct {
 	// execute modal was opened; the typed token must match it exactly to confirm.
 	modalBaseBranch string
 
+	// RepoLabel is the "owner/repo" slug shown in the header to identify which
+	// repository the TUI is operating against. Set at startup via WithRepoLabel;
+	// falls back to the toplevel directory basename when the remote is absent.
+	// Empty string means no label is rendered.
+	RepoLabel string
+
 	// ─── Toast ─────────────────────────────────────────────────────────────────
 	// Toast is the transient single-line notification shown after an action
 	// completes (success or error). Empty string means no toast is displayed.
@@ -281,6 +287,13 @@ func NewWithActor(agg *service.Aggregator, actor port.PlatformActor) Model {
 func (m Model) WithSnapshot(snap service.Snapshot) Model {
 	m.Snap = snap
 	m.Loading = false
+	return m
+}
+
+// WithRepoLabel returns a copy of m with RepoLabel set to label.
+// Typically called once at startup after resolving the git remote slug.
+func (m Model) WithRepoLabel(label string) Model {
+	m.RepoLabel = label
 	return m
 }
 

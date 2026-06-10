@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/John-Santa/talos/platform/console/adapter/tui"
@@ -335,6 +336,41 @@ func TestView_MasterDetail_GoldenStillValid(t *testing.T) {
 }
 
 // ─── Confirmation modal golden file ──────────────────────────────────────────
+
+// ─── RepoLabel in header ──────────────────────────────────────────────────────
+
+func TestView_Header_ContainsRepoLabel(t *testing.T) {
+	m := modelWithFixedState().WithRepoLabel("John-Santa/talos")
+	got := m.View()
+	if !strings.Contains(got, "John-Santa/talos") {
+		t.Errorf("View() header does not contain repo label\n--- got ---\n%s", got)
+	}
+}
+
+func TestView_Header_NoRepoLabel_LegacyFormat(t *testing.T) {
+	// When RepoLabel is empty the header falls back to "TALOS — <layout>".
+	m := modelWithFixedState()
+	got := m.View()
+	if !strings.Contains(got, "TALOS — Worktree Monitor") {
+		t.Errorf("View() without RepoLabel should contain legacy header, got:\n%s", got)
+	}
+}
+
+func TestView_Header_OverviewContainsRepoLabel(t *testing.T) {
+	m := modelWithOverviewState().WithRepoLabel("John-Santa/talos")
+	got := m.View()
+	if !strings.Contains(got, "John-Santa/talos") {
+		t.Errorf("View() overview header does not contain repo label\n--- got ---\n%s", got)
+	}
+}
+
+func TestView_Header_HybridContainsRepoLabel(t *testing.T) {
+	m := modelWithHybridState().WithRepoLabel("John-Santa/talos")
+	got := m.View()
+	if !strings.Contains(got, "John-Santa/talos") {
+		t.Errorf("View() hybrid header does not contain repo label\n--- got ---\n%s", got)
+	}
+}
 
 func TestView_Modal_GoldenFile(t *testing.T) {
 	m := modelWithModalOpen()
