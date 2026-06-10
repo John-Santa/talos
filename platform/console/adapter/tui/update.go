@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"context"
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -22,6 +24,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ─── Keyboard ─────────────────────────────────────────────────────────────
 	case tea.KeyMsg:
+		// When the confirmation modal is active, route all keys to it first.
+		if m.ModalActive {
+			return m.updateModal(msg)
+		}
 		switch msg.Type {
 		case tea.KeyCtrlC:
 			return m, tea.Quit
@@ -39,8 +45,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "?":
 			m.HelpShowAll = !m.HelpShowAll
 			m.helpModel.ShowAll = m.HelpShowAll
+		case "x":
+			m = m.openTeardownModal()
 		}
 		return m, nil
+
+	// ─── Action result (teardown etc.) ───────────────────────────────────────
+	case ActionResultMsg:
+		if msg.Err != nil {
+			m.Toast = fmt.Sprintf("✗ %s", msg.Err.Error())
+		} else {
+			m.Toast = "✓ teardown complete"
+		}
+		// Trigger a snapshot reload to reflect the updated worktree state.
+		return m, loadSnapshot(m.agg)
 
 	// ─── Async data loaded ────────────────────────────────────────────────────
 	case SnapshotMsg:
@@ -66,6 +84,77 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// ─── Modal routing ────────────────────────────────────────────────────────────
+
+// updateModal handles key events while the confirmation modal is active.
+// y/enter = confirm; n/esc = cancel; all other keys are swallowed.
+func (m Model) updateModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEnter:
+		return m.confirmModal()
+	case tea.KeyEsc:
+		m.ModalActive = false
+		return m, nil
+	}
+	switch msg.String() {
+	case "y":
+		return m.confirmModal()
+	case "n":
+		m.ModalActive = false
+		return m, nil
+	}
+	// All other keys are swallowed while modal is open.
+	return m, nil
+}
+
+// confirmModal closes the modal and dispatches the async teardown command.
+func (m Model) confirmModal() (tea.Model, tea.Cmd) {
+	m.ModalActive = false
+	figura := m.modalFigura
+	jiraKey := m.modalJiraKey
+	actor := m.actor
+	cmd := func() tea.Msg {
+		err := actor.TeardownWorktree(context.Background(), figura, jiraKey)
+		return ActionResultMsg{Err: err}
+	}
+	return m, cmd
+}
+
+// ─── Modal open helpers ───────────────────────────────────────────────────────
+
+// openTeardownModal opens the confirmation dialog for the currently-selected
+// worktree. If the list is empty or the actor is nil, it is a no-op.
+func (m Model) openTeardownModal() Model {
+	if m.actor == nil {
+		return m
+	}
+	wts := m.Snap.Worktrees
+	if len(wts) == 0 || m.Cursor >= len(wts) {
+		return m
+	}
+	wt := wts[m.Cursor]
+	figura, jiraKey := parseAgentBranch(wt.Branch)
+	if figura == "" {
+		figura = wt.Figura
+	}
+	m.ModalActive = true
+	m.ModalTitle = "Confirm teardown"
+	m.ModalMessage = fmt.Sprintf("Tear down worktree for %s (%s)?", figura, jiraKey)
+	m.modalFigura = figura
+	m.modalJiraKey = jiraKey
+	return m
+}
+
+// parseAgentBranch extracts (figura, jiraKey) from a branch name matching
+// the convention agent/<figura>/<JIRA-KEY>. Returns ("", "") if it does not match.
+func parseAgentBranch(branch string) (figura, jiraKey string) {
+	parts := strings.SplitN(branch, "/", 3)
+	if len(parts) == 3 && parts[0] == "agent" {
+		return parts[1], parts[2]
+	}
+	return "", ""
 }
 
 // ─── Cursor helpers ───────────────────────────────────────────────────────────

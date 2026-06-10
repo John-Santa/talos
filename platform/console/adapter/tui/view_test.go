@@ -13,6 +13,28 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// modelWithModalOpen returns a Model with the confirmation modal open for the
+// first worktree (atlas/TAL-1). Uses a real actor mock so x is not a no-op.
+func modelWithModalOpen() tui.Model {
+	actor := mock.NewPlatformActorMock()
+	r := mock.NewPlatformReaderMock()
+	snap := fixedSnapshot()
+	r.WorktreesResult = snap.Worktrees
+	r.MergePlanResult = snap.MergePlan
+	r.OverlapResult = snap.Overlap
+	agg := service.NewAggregator(r)
+	m := tui.NewWithActor(agg, actor)
+
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = next.(tui.Model)
+	next2, _ := m.Update(tui.SnapshotMsg{Snap: snap})
+	m = next2.(tui.Model)
+
+	// Open modal with x.
+	next3, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	return next3.(tui.Model)
+}
+
 var update = flag.Bool("update", false, "update golden files")
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -309,5 +331,36 @@ func TestView_MasterDetail_GoldenStillValid(t *testing.T) {
 	}
 	if got != string(want) {
 		t.Errorf("MasterDetail view broke after layout changes\n\n--- got ---\n%s\n--- want ---\n%s", got, string(want))
+	}
+}
+
+// ─── Confirmation modal golden file ──────────────────────────────────────────
+
+func TestView_Modal_GoldenFile(t *testing.T) {
+	m := modelWithModalOpen()
+	if !m.ModalActive {
+		t.Fatal("precondition: ModalActive must be true")
+	}
+	got := m.View()
+
+	goldenPath := filepath.Join("testdata", "modal.golden")
+
+	if *update {
+		if err := os.MkdirAll(filepath.Dir(goldenPath), 0o755); err != nil {
+			t.Fatalf("mkdir testdata: %v", err)
+		}
+		if err := os.WriteFile(goldenPath, []byte(got), 0o644); err != nil {
+			t.Fatalf("write golden: %v", err)
+		}
+		t.Logf("golden file updated: %s", goldenPath)
+		return
+	}
+
+	want, err := os.ReadFile(goldenPath)
+	if err != nil {
+		t.Fatalf("golden file missing — run: go test ./adapter/tui -update\n%v", err)
+	}
+	if got != string(want) {
+		t.Errorf("View() modal output does not match golden file %s\n\n--- got ---\n%s\n--- want ---\n%s", goldenPath, got, string(want))
 	}
 }
