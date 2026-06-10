@@ -107,26 +107,19 @@ jobs:
       - name: Build ov
         working-directory: platform/overlap-guard
         run: go build -o /tmp/ov ./cmd/ov
-      - name: Fetch base and in-flight agent branches
-        # ov diffs each open-PR head (origin/agent/*) three-dot against the base. Fetch BOTH explicitly
-        # so the scan never rests on an assumption about what the PR checkout left behind.
-        run: |
-          git fetch origin \
-            "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" \
-            '+refs/heads/agent/*:refs/remotes/origin/agent/*'
       - name: Cross open-PR diffs for file collisions
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           # In-flight set = OPEN PRs TARGETING THIS BASE. --base scoping is load-bearing: ov diffs
           # every head three-dot against origin/<base>, so a PR to a DIFFERENT base (a stacked PR, a
-          # main hotfix) would be mis-diffed and manufacture phantom collisions. Fail loud if gh errors.
-          PRS_JSON=$(gh pr list --state open --base "${{ github.base_ref }}" --limit 1000 --json headRefName) \
+          # main hotfix) would be mis-diffed and manufacture phantom collisions. --repo pins the target;
+          # fail loud if gh errors ($()-assignment alone does not trip `set -e`).
+          PRS_JSON=$(gh pr list --repo "${{ github.repository }}" --state open --base "${{ github.base_ref }}" --limit 1000 --json headRefName) \
             || { echo "::error::gh pr list failed"; exit 1; }
           COUNT=$(jq 'length' <<<"$PRS_JSON")
-          # --limit is a hard cap; if we hit it the set may be silently truncated (and the sentinel
-          # below can't detect it — the current PR sorts first and survives the cut). Refuse to pass a
-          # possibly-incomplete collision gate: a dropped colliding PR would be a false GREEN.
+          # --limit is a hard cap; if the count reaches it the set may be truncated (regardless of sort
+          # order). Refuse to pass a possibly-incomplete gate: a dropped colliding PR would be a false GREEN.
           if [ "$COUNT" -ge 1000 ]; then
             echo "::error::open-PR count hit the 1000 cap — in-flight set may be truncated; refusing to pass HG6"; exit 1
           fi
@@ -138,10 +131,23 @@ jobs:
             *",$GITHUB_HEAD_REF,"*) : ;;
             *) echo "::error::open-PR list missing this PR's branch ($GITHUB_HEAD_REF) — refusing to pass HG6"; exit 1 ;;
           esac
+          # Fail-closed on a non-conforming head: HG6 must be self-sufficient, not rely on branch-name
+          # being a required check on OTHER PRs. ov would silently DROP a non-agent head (hiding its
+          # collisions) — instead refuse to pass until the malformed PR is resolved. Same regex as branch-name.
+          IFS=',' read -ra HEADS <<<"$BRANCHES"
+          for h in "${HEADS[@]}"; do
+            if [[ ! "$h" =~ ^agent/[a-z]+/TAL-[0-9]+$ ]]; then
+              echo "::error::in-flight PR head '$h' is not a valid agent branch — HG6 cannot vouch for its collisions; resolve it first"; exit 1
+            fi
+          done
+          # Fetch base + agent heads HERE, right before the scan, to minimise the window where a
+          # force-push to an in-flight branch would leave a stale tip (ov runs with --no-fetch).
+          git fetch origin \
+            "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" \
+            '+refs/heads/agent/*:refs/remotes/origin/agent/*'
           # SCOPE (HG6): ov keys collisions on agent identity (figura) and skips same-agent pairs per the
           # overlap-guard spec REQ-VERDICT-2 — two OPEN PRs from the SAME figura on the same file are NOT
-          # flagged here. That is the canonical cross-agent semantics; widening it is a spec change (ZEUS),
-          # not CI wiring. Non-agent heads are dropped by ov (branch-name blocks them from merging anyway).
+          # flagged here. Canonical cross-agent semantics; widening it is a spec change (ZEUS), not CI wiring.
           /tmp/ov scan --remote --branches "$BRANCHES" --base "origin/${{ github.base_ref }}" --no-fetch
 
   judgment:
