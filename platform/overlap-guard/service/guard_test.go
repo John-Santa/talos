@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"errors"
+	"sort"
 	"testing"
 
 	"github.com/John-Santa/talos/platform/overlap-guard/domain/overlap"
@@ -70,6 +71,68 @@ func TestGuard_ScanInFlight_EmptyActive_ReturnsErrNoClaims(t *testing.T) {
 		t.Errorf("expected *overlap.ErrNoClaims, got %T: %v", err, err)
 	}
 	_ = report
+}
+
+// TestGuard_ScanInFlight_RemoteBranches_DeriveAgentFromBranch is the gate-path lock for `--remote`:
+// remote entries are "origin/"-prefixed and (worst case) carry no Figura. The agent identity MUST
+// be derived from the branch — otherwise distinct agents collapse to "" and a real BLOCK silently
+// downgrades to OK (the gate passes a genuine collision). RED before figuraFromBranch handles origin/.
+func TestGuard_ScanInFlight_RemoteBranches_DeriveAgentFromBranch(t *testing.T) {
+	t.Parallel()
+
+	lister := mock.NewWorktreeListerMock()
+	lister.ListResult = []port.WorktreeEntry{
+		{Figura: "", Branch: "origin/agent/themis/TAL-16", Status: "active"},
+		{Figura: "", Branch: "origin/agent/atlas/TAL-5", Status: "active"},
+	}
+	inspector := mock.NewGitInspectorMock()
+	inspector.RevParseResults = map[string]string{"develop": "abc123"}
+	inspector.ChangedFilesByBranch = map[string][]string{
+		"origin/agent/themis/TAL-16": {"shared.go"},
+		"origin/agent/atlas/TAL-5":   {"shared.go"},
+	}
+	cfg := service.DefaultTALConfig()
+	cfg.NoFetch = true
+
+	g := service.NewGuard(nil, lister, inspector, cfg)
+	report, err := g.ScanInFlight(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if report.Verdict != overlap.VerdictBlock {
+		t.Fatalf("Verdict = %v, want VerdictBlock (distinct agents themis/atlas on shared.go)", report.Verdict)
+	}
+	if len(report.FileCollisions) != 1 {
+		t.Fatalf("FileCollisions = %d, want 1", len(report.FileCollisions))
+	}
+	agents := []string{report.FileCollisions[0].A.Agent, report.FileCollisions[0].B.Agent}
+	sort.Strings(agents)
+	if agents[0] != "atlas" || agents[1] != "themis" {
+		t.Errorf("collision agents = %v, want [atlas themis] derived from branch (not empty Figura fallback)", agents)
+	}
+}
+
+// TestGuard_ScanInFlight_NoActiveEntries_SkipsFetchAndRevParse pins the ordering: a zero-PR scan must
+// short-circuit to ErrNoClaims (exit 0) WITHOUT shelling out to fetch/base-resolution, which can fail
+// on a CI checkout where the base ref isn't local. RED before the early-return is added.
+func TestGuard_ScanInFlight_NoActiveEntries_SkipsFetchAndRevParse(t *testing.T) {
+	t.Parallel()
+
+	lister := mock.NewWorktreeListerMock() // empty in-flight set
+	inspector := mock.NewGitInspectorMock()
+	inspector.FetchErr = errors.New("fetch must not be called on an empty set")
+	inspector.RevParseErrs = map[string]error{"develop": errors.New("revparse must not be called on an empty set")}
+	cfg := service.DefaultTALConfig()
+
+	g := service.NewGuard(nil, lister, inspector, cfg)
+	_, err := g.ScanInFlight(context.Background())
+
+	var noClaims *overlap.ErrNoClaims
+	if !errors.As(err, &noClaims) {
+		t.Fatalf("want *overlap.ErrNoClaims, got %T: %v", err, err)
+	}
+	inspector.AssertNotCalled(t, "Fetch")
+	inspector.AssertNotCalled(t, "RevParse")
 }
 
 func TestGuard_ScanInFlight_NoFetch_OmitsFetch(t *testing.T) {
