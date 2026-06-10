@@ -322,6 +322,48 @@ func emitMetricResult(w io.Writer, report overlap.Report, jsonOut, strict bool, 
 	return errForStrict(report, strict, threshold)
 }
 
+// scanner/checker/metricer are the narrow report-producing seams each subcommand delegates to.
+// *service.Guard satisfies all three; fakes inject canned reports in tests so the command-logic
+// wiring (source → emit → verdict error) is regression-locked without real git/wt.
+type scanner interface {
+	ScanInFlight(ctx context.Context) (overlap.Report, error)
+}
+
+type checker interface {
+	CheckPreAssignment(ctx context.Context, module, agent string, ownerFiles []string) (overlap.Report, error)
+}
+
+type metricer interface {
+	Metric(ctx context.Context) (overlap.Report, error)
+}
+
+// runScan produces the scan report and emits it; the verdict error propagates to exit 1.
+func runScan(ctx context.Context, w io.Writer, s scanner, jsonOut bool) error {
+	report, err := s.ScanInFlight(ctx)
+	if err != nil {
+		return err
+	}
+	return emitScanResult(w, report, jsonOut)
+}
+
+// runCheck produces the check report and emits it; the verdict error propagates to exit 1.
+func runCheck(ctx context.Context, w io.Writer, c checker, module, agent string, ownerFiles []string, jsonOut bool) error {
+	report, err := c.CheckPreAssignment(ctx, module, agent, ownerFiles)
+	if err != nil {
+		return err
+	}
+	return emitCheckResult(w, report, jsonOut)
+}
+
+// runMetric produces the metric report and emits it; the --strict error propagates to exit 1.
+func runMetric(ctx context.Context, w io.Writer, m metricer, jsonOut, strict bool, threshold float64) error {
+	report, err := m.Metric(ctx)
+	if err != nil {
+		return err
+	}
+	return emitMetricResult(w, report, jsonOut, strict, threshold)
+}
+
 // listerMode is the worktree-lister strategy chosen by cmdScan.
 type listerMode int
 
@@ -414,13 +456,7 @@ func cmdCheck(args []string) error {
 
 	cfg.MaxResults = *maxResults
 	guard := service.NewGuard(searcher, nil, nil, cfg)
-	ctx := context.Background()
-	report, err := guard.CheckPreAssignment(ctx, *module, *agent, ownerFiles)
-	if err != nil {
-		return err
-	}
-
-	return emitCheckResult(os.Stdout, report, *jsonOut)
+	return runCheck(context.Background(), os.Stdout, guard, *module, *agent, ownerFiles, *jsonOut)
 }
 
 func cmdScan(args []string) error {
@@ -455,6 +491,12 @@ func cmdScan(args []string) error {
 		}
 	})
 
+	// --branches only feeds the remote explicit lister; without --remote it would be silently
+	// dropped to a worktree scan (likely a false all-clear on a hard gate). Fail loud instead.
+	if branchesSet && !*remote {
+		return fmt.Errorf("--branches requires --remote")
+	}
+
 	var lister port.WorktreeLister
 	switch scanListerMode(*remote, branchesSet) {
 	case modeRemoteExplicit:
@@ -468,14 +510,7 @@ func cmdScan(args []string) error {
 	}
 
 	guard := service.NewGuard(nil, lister, inspector, cfg)
-
-	ctx := context.Background()
-	report, err := guard.ScanInFlight(ctx)
-	if err != nil {
-		return err
-	}
-
-	return emitScanResult(os.Stdout, report, *jsonOut)
+	return runScan(context.Background(), os.Stdout, guard, *jsonOut)
 }
 
 func cmdMetric(args []string) error {
@@ -506,12 +541,5 @@ func cmdMetric(args []string) error {
 	// scope here (the hard CI gate is `scan --remote --branches`). metric always uses local worktrees.
 	lister := wtcli.NewLister(*wtBin)
 	guard := service.NewGuard(nil, lister, inspector, cfg)
-
-	ctx := context.Background()
-	report, err := guard.Metric(ctx)
-	if err != nil {
-		return err
-	}
-
-	return emitMetricResult(os.Stdout, report, *jsonOut, *strict, *threshold)
+	return runMetric(context.Background(), os.Stdout, guard, *jsonOut, *strict, *threshold)
 }

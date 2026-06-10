@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -9,6 +10,35 @@ import (
 
 	"github.com/John-Santa/talos/platform/overlap-guard/domain/overlap"
 )
+
+// fakeScanner/fakeChecker/fakeMetricer inject a canned report+error into the run* seams so the
+// command-logic wiring (source → emit → verdict error) is regression-locked without real git/wt.
+type fakeScanner struct {
+	report overlap.Report
+	err    error
+}
+
+func (f fakeScanner) ScanInFlight(context.Context) (overlap.Report, error) {
+	return f.report, f.err
+}
+
+type fakeChecker struct {
+	report overlap.Report
+	err    error
+}
+
+func (f fakeChecker) CheckPreAssignment(context.Context, string, string, []string) (overlap.Report, error) {
+	return f.report, f.err
+}
+
+type fakeMetricer struct {
+	report overlap.Report
+	err    error
+}
+
+func (f fakeMetricer) Metric(context.Context) (overlap.Report, error) {
+	return f.report, f.err
+}
 
 // blockReport builds a report whose verdict is BLOCK (two distinct agents, same file).
 func blockReport(t *testing.T) overlap.Report {
@@ -480,10 +510,94 @@ func TestEmitMetricResult_JSONOverNotStrict_NilButValidJSON(t *testing.T) {
 	}
 }
 
-// TestRun_ScanBranches_FlagMustBeDeclared — mirror of the --remote flag-declared guard for --branches.
-func TestRun_ScanBranches_FlagMustBeDeclared(t *testing.T) {
-	err := run([]string{"scan", "--remote", "--branches", "agent/x/TAL-1", "--no-fetch", "--base", "origin/develop"})
-	if err != nil && strings.Contains(err.Error(), "flag provided but not defined") {
-		t.Fatalf("--branches flag not declared in cmdScan: %v", err)
+// TestRun_ScanBranches_RequiresRemote — positively asserts --branches is declared AND wired: without
+// --remote it must fail loud ("requires --remote"), never a silent worktree scan / false all-clear.
+// (Reaches the validation before any git I/O, so it is deterministic.) Replaces the weaker
+// flag-declared-only guard ARGOS flagged as one-sided.
+func TestRun_ScanBranches_RequiresRemote(t *testing.T) {
+	err := run([]string{"scan", "--branches", "agent/x/TAL-1"})
+	if err == nil || !strings.Contains(err.Error(), "requires --remote") {
+		t.Fatalf("scan --branches without --remote must error with 'requires --remote', got: %v", err)
+	}
+}
+
+// --- ARGOS Round 2: lock the command-logic wiring (source → emit → verdict error) end-to-end. ---
+// The run* seams are what cmdCheck/cmdScan/cmdMetric delegate to; testing them with a fake source
+// catches a revert that drops the verdict error from the --json path AT THE CALL SITE (the exact
+// place the original gate-defeating bug lived) — which the helper-only tests could not catch.
+
+// TestRunScan_JSONBlock_PropagatesErrorAndEmitsJSON — BLOCK report through scan seam → exit 1 + valid JSON.
+func TestRunScan_JSONBlock_PropagatesErrorAndEmitsJSON(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	err := runScan(context.Background(), &buf, fakeScanner{report: blockReport(t)}, true)
+	if err == nil {
+		t.Fatal("runScan(json, BLOCK) = nil, want non-nil error")
+	}
+	if got := exitCodeFor(err); got != 1 {
+		t.Errorf("exitCodeFor = %d, want 1", got)
+	}
+	var got scanOnlyJSON
+	if e := json.Unmarshal(buf.Bytes(), &got); e != nil {
+		t.Fatalf("stdout not valid JSON: %v", e)
+	}
+	if got.Verdict != "BLOCK" {
+		t.Errorf("json verdict = %q, want BLOCK", got.Verdict)
+	}
+}
+
+// TestRunScan_NoClaims_Exit0 — ErrNoClaims from the source still maps to exit 0 (no in-flight PRs).
+func TestRunScan_NoClaims_Exit0(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	err := runScan(context.Background(), &buf, fakeScanner{err: &overlap.ErrNoClaims{}}, true)
+	if err == nil {
+		t.Fatal("runScan should propagate ErrNoClaims")
+	}
+	if got := exitCodeFor(err); got != 0 {
+		t.Errorf("exitCodeFor(ErrNoClaims) = %d, want 0", got)
+	}
+}
+
+// TestRunCheck_JSONBlock_PropagatesError — BLOCK report through check seam → non-nil error.
+func TestRunCheck_JSONBlock_PropagatesError(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	err := runCheck(context.Background(), &buf, fakeChecker{report: blockReport(t)}, "mod:core", "atlas", nil, true)
+	if err == nil {
+		t.Fatal("runCheck(json, BLOCK) = nil, want non-nil error")
+	}
+	if got := exitCodeFor(err); got != 1 {
+		t.Errorf("exitCodeFor = %d, want 1", got)
+	}
+}
+
+// TestRunMetric_JSONOverStrict_PropagatesError — over threshold + --strict through metric seam → error.
+func TestRunMetric_JSONOverStrict_PropagatesError(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	err := runMetric(context.Background(), &buf, fakeMetricer{report: blockReport(t)}, true, true, 0.15)
+	if err == nil {
+		t.Fatal("runMetric(json, over, strict) = nil, want non-nil error")
+	}
+}
+
+// TestRunMetric_JSONOverNotStrict_Nil — without --strict, metric stays informational (exit 0).
+func TestRunMetric_JSONOverNotStrict_Nil(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	if err := runMetric(context.Background(), &buf, fakeMetricer{report: blockReport(t)}, true, false, 0.15); err != nil {
+		t.Errorf("runMetric(json, over, not-strict) = %v, want nil", err)
+	}
+}
+
+// TestRunScan_SourceError_Propagates — an underlying source error surfaces unchanged (exit 1).
+func TestRunScan_SourceError_Propagates(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	sentinel := errors.New("boom")
+	err := runScan(context.Background(), &buf, fakeScanner{err: sentinel}, true)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("runScan should propagate source error, got %v", err)
 	}
 }

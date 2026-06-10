@@ -63,8 +63,8 @@ func NewListerFromBranches(branches []string) *Lister {
 	return &Lister{entries: entriesFromBranchNames(branches), explicit: true}
 }
 
-// List returns one WorktreeEntry per in-flight agent branch. In explicit mode (runner nil) it
-// returns the precomputed set; otherwise it runs `git ls-remote --heads origin agent/*`.
+// List returns one WorktreeEntry per in-flight agent branch. In explicit mode (l.explicit, set by
+// NewListerFromBranches) it returns the precomputed set; otherwise it runs `git ls-remote --heads origin agent/*`.
 // Branch is stored as "origin/<branch>" so ChangedFiles(baseSHA, entry.Branch) works after fetch.
 func (l *Lister) List(ctx context.Context) ([]port.WorktreeEntry, error) {
 	if l.explicit {
@@ -113,13 +113,18 @@ func ParseLsRemoteOutput(raw string) ([]port.WorktreeEntry, error) {
 }
 
 // entriesFromBranchNames converts plain agent/* branch names (no refs/heads/ prefix) into entries,
-// dropping blanks and non-agent branches. Shared by NewListerFromBranches.
+// dropping blanks, non-agent branches, and exact-duplicate branches (so a repeated input doesn't
+// emit duplicate file_collisions rows). Shared by NewListerFromBranches.
 func entriesFromBranchNames(branches []string) []port.WorktreeEntry {
 	var entries []port.WorktreeEntry
+	seen := make(map[string]bool)
 	for _, b := range branches {
-		if e, ok := entryFromBranchPath(b); ok {
-			entries = append(entries, e)
+		e, ok := entryFromBranchPath(b)
+		if !ok || seen[e.Branch] {
+			continue
 		}
+		seen[e.Branch] = true
+		entries = append(entries, e)
 	}
 	return entries
 }

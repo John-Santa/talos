@@ -255,6 +255,23 @@ func TestNewListerFromBranches_SkipsNonAgentAndBlank(t *testing.T) {
 	}
 }
 
+// TestNewListerFromBranches_DeduplicatesBranches verifies a repeated branch yields a single entry
+// (a duplicate input must not emit duplicate file_collisions rows).
+func TestNewListerFromBranches_DeduplicatesBranches(t *testing.T) {
+	t.Parallel()
+
+	lister := gitremote.NewListerFromBranches([]string{
+		"agent/themis/TAL-16", "agent/themis/TAL-16", "agent/atlas/TAL-5",
+	})
+	entries, err := lister.List(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 deduped entries, got %d (%+v)", len(entries), entries)
+	}
+}
+
 // TestNewListerFromBranches_Empty_NoEntries verifies an empty in-flight set yields zero claims
 // (no open PRs → no collision, exit 0 via ErrNoClaims upstream).
 func TestNewListerFromBranches_Empty_NoEntries(t *testing.T) {
