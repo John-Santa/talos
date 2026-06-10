@@ -80,25 +80,23 @@ func NewRollbacker(evidenceBinary, wtBinary string, r runner.Runner) *Rollbacker
 	return &Rollbacker{evidenceBinary: evidenceBinary, wtBinary: wtBinary, runner: r}
 }
 
-// Recipe11 executes the CONSTITUTION §11 rollback recipe:
-//  1. evidence run-loop --phase=archive (→ To Do transition) — best-effort
-//  2. evidence run-loop with a failure comment — best-effort
-//  3. wt teardown <figura> --force — best-effort
+// Recipe11 executes the CONSTITUTION §11 rollback recipe when a task fails
+// mid-dispatch. It atomically transitions the Jira issue back to "To Do" and
+// leaves a failure comment — preventing a failed issue from appearing as Done
+// — then discards the worktree.
 //
-// All 3 steps are attempted even if earlier ones fail.
-// Returns the first non-nil error encountered, if any.
+// Steps (both best-effort; first error is captured but all steps are attempted):
+//  1. evidence run-loop --phase=reset: transitions the issue to the "new"
+//     (To Do) category and adds a comment with the failure reason.
+//  2. wt teardown <figura> --force: discard the agent's worktree.
 func (rb *Rollbacker) Recipe11(ctx context.Context, jiraKey, figura, reason string) error {
 	var firstErr error
 
-	// Step 1: transition issue back to To Do via a special --phase that marks revert.
-	// We use "propose" phase without creating (evidence is idempotent) to reset state.
-	// In practice the evidence CLI is the canonical rollback path; we pass the
-	// reason as the summary so it appears in Jira.
 	comment := fmt.Sprintf("ROLLBACK §11: %s", strings.TrimSpace(reason))
 
-	// Step 1: Add a failure comment to the Jira issue.
+	// Step 1: transition issue → To Do + add failure comment (via "reset" preset).
 	_, err := rb.runner.Run(ctx, rb.evidenceBinary, "run-loop",
-		"--phase", "propose",
+		"--phase", "reset",
 		"--change", "rollback",
 		"--agent", figura,
 		"--module", "rollback",
@@ -106,23 +104,10 @@ func (rb *Rollbacker) Recipe11(ctx context.Context, jiraKey, figura, reason stri
 		"--summary", comment,
 	)
 	if err != nil && firstErr == nil {
-		firstErr = fmt.Errorf("recipe11: evidence comment failed: %w", err)
+		firstErr = fmt.Errorf("recipe11: evidence reset failed: %w", err)
 	}
 
-	// Step 2: evidence transition → comment with reason.
-	_, err = rb.runner.Run(ctx, rb.evidenceBinary, "run-loop",
-		"--phase", "archive",
-		"--change", "rollback",
-		"--agent", figura,
-		"--module", "rollback",
-		"--jira-key", jiraKey,
-		"--summary", comment,
-	)
-	if err != nil && firstErr == nil {
-		firstErr = fmt.Errorf("recipe11: evidence transition failed: %w", err)
-	}
-
-	// Step 3: wt teardown --force (always attempted).
+	// Step 2: wt teardown --force (always attempted).
 	_, err = rb.runner.Run(ctx, rb.wtBinary, "teardown", figura, "--force")
 	if err != nil && firstErr == nil {
 		firstErr = fmt.Errorf("recipe11: wt teardown --force failed: %w", err)

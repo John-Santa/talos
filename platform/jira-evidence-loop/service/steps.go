@@ -27,6 +27,10 @@ const (
 	StepAttach
 	// StepTransitionDone (7): transition issue → done.
 	StepTransitionDone
+	// StepTransitionToDo (8): transition issue → new (To Do). Used by the
+	// "reset" preset (CONSTITUTION §11 rollback) to undo a dispatch that failed
+	// mid-flight, so the issue does not remain In Progress or Done.
+	StepTransitionToDo
 )
 
 // StepSet is the set of steps to execute in a single RunSteps call.
@@ -90,7 +94,14 @@ func PhasePreset(phase string) (StepSet, error) {
 		return StepSet{
 			StepTransitionDone: true,
 		}, nil
+	case "reset":
+		// §11 rollback preset: transition issue back to To Do + add a failure
+		// comment. Does NOT create, log work, or transition to Done.
+		return StepSet{
+			StepTransitionToDo: true,
+			StepComment:        true,
+		}, nil
 	default:
-		return nil, fmt.Errorf("evidence: unknown SDD phase %q; valid phases: propose, spec, design, tasks, apply, verify, archive", phase)
+		return nil, fmt.Errorf("evidence: unknown SDD phase %q; valid phases: propose, spec, design, tasks, apply, verify, archive, reset", phase)
 	}
 }

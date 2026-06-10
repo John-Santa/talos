@@ -131,7 +131,9 @@ func TestRunPhase_Error(t *testing.T) {
 	}
 }
 
-// TestRecipe11_HappyPath verifies Recipe11 executes 3 steps.
+// TestRecipe11_HappyPath verifies Recipe11 executes exactly 2 steps:
+// 1. evidence run-loop --phase=reset (transition to To Do + comment)
+// 2. wt teardown <figura> --force
 func TestRecipe11_HappyPath(t *testing.T) {
 	t.Parallel()
 	callCount := 0
@@ -147,8 +149,45 @@ func TestRecipe11_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Recipe11() unexpected error: %v", err)
 	}
-	if callCount != 3 {
-		t.Errorf("Recipe11 should make 3 runner calls, got %d", callCount)
+	if callCount != 2 {
+		t.Errorf("Recipe11 should make 2 runner calls, got %d", callCount)
+	}
+
+	// Call 1: evidence run-loop --phase=reset
+	if len(calls) < 1 || calls[0][0] != "evidence" {
+		t.Errorf("call[0]: expected binary 'evidence', got %v", calls)
+	}
+	hasFlag := func(call []string, flag, value string) bool {
+		for i, a := range call {
+			if a == flag && i+1 < len(call) && call[i+1] == value {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasFlag(calls[0], "--phase", "reset") {
+		t.Errorf("call[0]: --phase=reset not found in %v", calls[0])
+	}
+	if !hasFlag(calls[0], "--jira-key", "TAL-42") {
+		t.Errorf("call[0]: --jira-key=TAL-42 not found in %v", calls[0])
+	}
+
+	// Call 2: wt teardown <figura> --force
+	if len(calls) < 2 || calls[1][0] != "wt" {
+		t.Errorf("call[1]: expected binary 'wt', got %v", calls)
+	}
+	if len(calls[1]) < 2 || calls[1][1] != "teardown" {
+		t.Errorf("call[1]: expected subcommand 'teardown', got %v", calls[1])
+	}
+	foundForce := false
+	for _, a := range calls[1] {
+		if a == "--force" {
+			foundForce = true
+			break
+		}
+	}
+	if !foundForce {
+		t.Errorf("call[1]: --force not found in %v", calls[1])
 	}
 }
 

@@ -189,6 +189,86 @@ func TestPhasePreset_UnknownPhase_Error(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// PhasePreset("reset") — §11 rollback preset
+// ---------------------------------------------------------------------------
+
+func TestPhasePreset_Reset_HasTransitionToDoAndComment(t *testing.T) {
+	ss, err := service.PhasePreset("reset")
+	if err != nil {
+		t.Fatalf("PhasePreset(\"reset\") error = %v, want nil", err)
+	}
+
+	mustHave := []service.Step{
+		service.StepTransitionToDo,
+		service.StepComment,
+	}
+	mustNotHave := []service.Step{
+		service.StepOwnership,
+		service.StepCreate,
+		service.StepTransitionInProgress,
+		service.StepWorklog,
+		service.StepRemoteLink,
+		service.StepAttach,
+		service.StepTransitionDone,
+	}
+
+	for _, s := range mustHave {
+		if !ss[s] {
+			t.Errorf("PhasePreset(\"reset\"): step %d should be present", s)
+		}
+	}
+	for _, s := range mustNotHave {
+		if ss[s] {
+			t.Errorf("PhasePreset(\"reset\"): step %d should be absent", s)
+		}
+	}
+}
+
+// TestRunSteps_ResetPreset_TransitionsToNewAndComments verifies that the
+// "reset" preset (§11 rollback) calls GetTransitions + DoTransition(→new) +
+// AddComment, and does NOT call Create, worklog, remote-link, attach, or
+// transition to Done.
+func TestRunSteps_ResetPreset_TransitionsToNewAndComments(t *testing.T) {
+	m := mock.NewJiraClientMock()
+	m.GetTransitionsResult = transitionsForCategories()
+
+	preset, err := service.PhasePreset("reset")
+	if err != nil {
+		t.Fatalf("PhasePreset(\"reset\"): %v", err)
+	}
+
+	loop := service.NewEvidenceLoop(m, validConfig())
+
+	in := validInput()
+	in.JiraKey = "TAL-42"
+
+	key, err := loop.RunSteps(context.Background(), in, preset)
+	if err != nil {
+		t.Fatalf("RunSteps(reset) error = %v", err)
+	}
+	if key != "TAL-42" {
+		t.Errorf("RunSteps(reset) key = %q, want \"TAL-42\"", key)
+	}
+
+	// Must call GetTransitions + DoTransition(→new).
+	m.AssertCallCount(t, "GetTransitions", 1)
+	m.AssertCallCount(t, "DoTransition", 1)
+	assertTransitionCategoryCount(t, m, "new", 1)
+
+	// Must add a comment.
+	m.AssertCallCount(t, "AddComment", 1)
+
+	// Must NOT touch create/worklog/remote-link/attach/done.
+	m.AssertCallCount(t, "Search", 0)
+	m.AssertCallCount(t, "CreateIssue", 0)
+	m.AssertCallCount(t, "AddWorklog", 0)
+	m.AssertCallCount(t, "CreateRemoteLink", 0)
+	m.AssertCallCount(t, "AddAttachment", 0)
+	assertTransitionCategoryCount(t, m, "done", 0)
+	assertTransitionCategoryCount(t, m, "indeterminate", 0)
+}
+
+// ---------------------------------------------------------------------------
 // RunSteps — step-skip behaviour
 //
 // These tests exercise RunSteps with each phase preset and assert that only

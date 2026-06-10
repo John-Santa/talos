@@ -222,6 +222,22 @@ func (l *EvidenceLoop) RunSteps(ctx context.Context, in RunInput, steps StepSet)
 	}
 
 	// -----------------------------------------------------------------------
+	// Step 1b: Transition → new (To Do) — used by the "reset" (§11 rollback)
+	// preset to undo a failed dispatch without leaving the issue In Progress.
+	// -----------------------------------------------------------------------
+	if steps[StepTransitionToDo] {
+		if in.JiraKey == "" {
+			return "", fmt.Errorf("evidence loop step 1b (transition→new): JiraKey is required for reset phase")
+		}
+		if issueKey == "" {
+			issueKey = in.JiraKey
+		}
+		if err := l.doTransitionToCategory(ctx, issueKey, StatusCategoryNew, 0); err != nil {
+			return issueKey, fmt.Errorf("evidence loop step 1b (transition→new): %w", err)
+		}
+	}
+
+	// -----------------------------------------------------------------------
 	// Step 2: Transition → indeterminate (In Progress)
 	// -----------------------------------------------------------------------
 	if steps[StepTransitionInProgress] {
@@ -299,7 +315,7 @@ func (l *EvidenceLoop) RunSteps(ctx context.Context, in RunInput, steps StepSet)
 // StepCreate).
 func needsIssueKey(steps StepSet) bool {
 	for _, s := range []Step{
-		StepTransitionInProgress, StepComment, StepWorklog,
+		StepTransitionToDo, StepTransitionInProgress, StepComment, StepWorklog,
 		StepRemoteLink, StepAttach, StepTransitionDone,
 	} {
 		if steps[s] {
