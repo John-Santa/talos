@@ -232,3 +232,123 @@ func TestReportToCheckJSON_AdvisoriesFromReport(t *testing.T) {
 		t.Errorf("advisories[0] = %q, want %q", out.Advisories[0], report.Advisories[0])
 	}
 }
+
+// --- TAL-16 fix B (--branches): an EXPLICIT --branches must never fall back to ls-remote. ---
+// CI runs `gh pr list --state open` and passes the result to --branches. When there are zero
+// open PRs the value is empty — but it was still provided, and must mean "scan nothing", NOT
+// "fall back to ls-remote" (which would resurface stale squash-merged branches: the original bug).
+
+// TestScanListerMode_ExplicitBranchesEvenWhenEmpty — branchesSet wins even with an empty value.
+func TestScanListerMode_ExplicitBranchesEvenWhenEmpty(t *testing.T) {
+	t.Parallel()
+	if got := scanListerMode(true, true); got != modeRemoteExplicit {
+		t.Errorf("scanListerMode(remote=true, branchesSet=true) = %v, want modeRemoteExplicit", got)
+	}
+}
+
+// TestScanListerMode_RemoteWithoutBranches_UsesLsRemote — --remote alone keeps ls-remote discovery.
+func TestScanListerMode_RemoteWithoutBranches_UsesLsRemote(t *testing.T) {
+	t.Parallel()
+	if got := scanListerMode(true, false); got != modeRemoteLsRemote {
+		t.Errorf("scanListerMode(remote=true, branchesSet=false) = %v, want modeRemoteLsRemote", got)
+	}
+}
+
+// TestScanListerMode_NoRemote_UsesWorktree — without --remote the wt lister is used; --branches is ignored.
+func TestScanListerMode_NoRemote_UsesWorktree(t *testing.T) {
+	t.Parallel()
+	if got := scanListerMode(false, false); got != modeWorktree {
+		t.Errorf("scanListerMode(remote=false, branchesSet=false) = %v, want modeWorktree", got)
+	}
+	if got := scanListerMode(false, true); got != modeWorktree {
+		t.Errorf("scanListerMode(remote=false, branchesSet=true) = %v, want modeWorktree (branches ignored without --remote)", got)
+	}
+}
+
+// --- TAL-16 fix A (exit code): the --json branch must NOT swallow the verdict. ---
+// errForBlock/errForStrict are the pure decision functions shared by the JSON and text paths
+// so `ov scan/check/metric --json` exit codes match the text path (BLOCK → 1, over+strict → 1).
+
+// TestErrForBlock_Block_MapsToExit1 — a BLOCK report yields an error that exitCodeFor maps to 1.
+func TestErrForBlock_Block_MapsToExit1(t *testing.T) {
+	t.Parallel()
+	atlas := overlap.NewClaim("atlas", "mod:core", "branch-a", []string{"shared.go"}, overlap.SourceActual)
+	hermes := overlap.NewClaim("hermes", "mod:core", "branch-b", []string{"shared.go"}, overlap.SourceActual)
+	report := overlap.NewReport([]overlap.Claim{atlas, hermes}, 0.15)
+	if report.Verdict != overlap.VerdictBlock {
+		t.Fatalf("precondition: want BLOCK verdict, got %v", report.Verdict)
+	}
+	err := errForBlock(report)
+	if err == nil {
+		t.Fatal("errForBlock(BLOCK) = nil, want non-nil error")
+	}
+	if got := exitCodeFor(err); got != 1 {
+		t.Errorf("exitCodeFor(errForBlock(BLOCK)) = %d, want 1", got)
+	}
+}
+
+// TestErrForBlock_OK_ReturnsNil — an OK report yields no error (exit 0).
+func TestErrForBlock_OK_ReturnsNil(t *testing.T) {
+	t.Parallel()
+	atlas := overlap.NewClaim("atlas", "mod:core", "branch-a", []string{"a.go"}, overlap.SourceActual)
+	report := overlap.NewReport([]overlap.Claim{atlas}, 0.15)
+	if report.Verdict != overlap.VerdictOK {
+		t.Fatalf("precondition: want OK verdict, got %v", report.Verdict)
+	}
+	if err := errForBlock(report); err != nil {
+		t.Errorf("errForBlock(OK) = %v, want nil", err)
+	}
+}
+
+// TestErrForBlock_Serialize_ReturnsNil — SERIALIZE is not a hard block (exit 0).
+func TestErrForBlock_Serialize_ReturnsNil(t *testing.T) {
+	t.Parallel()
+	atlas := overlap.NewClaim("atlas", "mod:core", "branch-a", []string{"a.go"}, overlap.SourceActual)
+	hermes := overlap.NewClaim("hermes", "mod:core", "branch-b", []string{"b.go"}, overlap.SourceActual)
+	report := overlap.NewReport([]overlap.Claim{atlas, hermes}, 0.15)
+	if report.Verdict != overlap.VerdictSerialize {
+		t.Fatalf("precondition: want SERIALIZE verdict, got %v", report.Verdict)
+	}
+	if err := errForBlock(report); err != nil {
+		t.Errorf("errForBlock(SERIALIZE) = %v, want nil", err)
+	}
+}
+
+// TestErrForStrict_OverThresholdStrict_ReturnsError — metric over threshold with --strict exits 1.
+func TestErrForStrict_OverThresholdStrict_ReturnsError(t *testing.T) {
+	t.Parallel()
+	atlas := overlap.NewClaim("atlas", "mod:core", "branch-a", []string{"a.go"}, overlap.SourceActual)
+	hermes := overlap.NewClaim("hermes", "mod:core", "branch-b", []string{"a.go"}, overlap.SourceActual)
+	report := overlap.NewReport([]overlap.Claim{atlas, hermes}, 0.15)
+	if !report.OverThreshold {
+		t.Fatalf("precondition: want OverThreshold true, got false (rate=%v)", report.CollisionRate)
+	}
+	if err := errForStrict(report, true, 0.15); err == nil {
+		t.Error("errForStrict(over, strict=true) = nil, want error")
+	}
+}
+
+// TestErrForStrict_OverThresholdNotStrict_ReturnsNil — without --strict, metric stays informational.
+func TestErrForStrict_OverThresholdNotStrict_ReturnsNil(t *testing.T) {
+	t.Parallel()
+	atlas := overlap.NewClaim("atlas", "mod:core", "branch-a", []string{"a.go"}, overlap.SourceActual)
+	hermes := overlap.NewClaim("hermes", "mod:core", "branch-b", []string{"a.go"}, overlap.SourceActual)
+	report := overlap.NewReport([]overlap.Claim{atlas, hermes}, 0.15)
+	if err := errForStrict(report, false, 0.15); err != nil {
+		t.Errorf("errForStrict(over, strict=false) = %v, want nil", err)
+	}
+}
+
+// TestErrForStrict_UnderThresholdStrict_ReturnsNil — under threshold never errors, even with --strict.
+func TestErrForStrict_UnderThresholdStrict_ReturnsNil(t *testing.T) {
+	t.Parallel()
+	atlas := overlap.NewClaim("atlas", "mod:core", "branch-a", []string{"a.go"}, overlap.SourceActual)
+	hermes := overlap.NewClaim("hermes", "mod:other", "branch-b", []string{"b.go"}, overlap.SourceActual)
+	report := overlap.NewReport([]overlap.Claim{atlas, hermes}, 0.15)
+	if report.OverThreshold {
+		t.Fatalf("precondition: want OverThreshold false, got true (rate=%v)", report.CollisionRate)
+	}
+	if err := errForStrict(report, true, 0.15); err != nil {
+		t.Errorf("errForStrict(under, strict=true) = %v, want nil", err)
+	}
+}

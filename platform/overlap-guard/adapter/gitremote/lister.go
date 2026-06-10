@@ -28,11 +28,17 @@ func (e *ErrLsRemoteFailed) Unwrap() error { return e.Cause }
 // returns stdout as a string. This mirrors the injected-runner pattern used by gitcli/wtcli for testability.
 type RunnerFunc func(ctx context.Context, args []string) (string, error)
 
-// Lister implements port.WorktreeLister by listing open agent/* branches from the remote.
-// All discovered branches are returned with Status="active" — every branch tracked on origin
-// is considered in-flight for collision purposes.
+// Lister implements port.WorktreeLister by listing open agent/* branches.
+// All branches are returned with Status="active" — every in-flight branch is a collision candidate.
+//
+// Two modes:
+//   - ls-remote mode (NewLister/NewListerWithRunner): List() shells out to `git ls-remote`.
+//   - explicit mode (NewListerFromBranches): List() returns a precomputed entry set and never
+//     touches git — used by `ov scan --remote --branches`, where CI supplies the open-PR set
+//     (`gh pr list`) so stale squash-merged branches are excluded by construction.
 type Lister struct {
-	runner RunnerFunc
+	runner  RunnerFunc
+	entries []port.WorktreeEntry // explicit mode: returned verbatim when runner is nil
 }
 
 var _ port.WorktreeLister = (*Lister)(nil)
@@ -48,11 +54,21 @@ func NewListerWithRunner(runner RunnerFunc) *Lister {
 	return &Lister{runner: runner}
 }
 
-// List runs `git ls-remote --heads origin agent/*` and returns one WorktreeEntry per agent branch.
-// Branch is stored as "origin/<branch>" so that ChangedFiles(baseSHA, entry.Branch) works after fetch.
-// Figura is derived by parsing the second segment of the agent/<figura>/... path.
-// Status is always "active" — every remote agent branch is considered in-flight.
+// NewListerFromBranches constructs an explicit-mode Lister over the given agent/* branch names
+// (the open-PR set, e.g. from `gh pr list --state open --json headRefName`). It bypasses
+// `git ls-remote`, so stale squash-merged branches that ls-remote would surface are excluded.
+// Blank and non-agent branch names are dropped.
+func NewListerFromBranches(branches []string) *Lister {
+	return &Lister{entries: entriesFromBranchNames(branches)}
+}
+
+// List returns one WorktreeEntry per in-flight agent branch. In explicit mode (runner nil) it
+// returns the precomputed set; otherwise it runs `git ls-remote --heads origin agent/*`.
+// Branch is stored as "origin/<branch>" so ChangedFiles(baseSHA, entry.Branch) works after fetch.
 func (l *Lister) List(ctx context.Context) ([]port.WorktreeEntry, error) {
+	if l.runner == nil {
+		return l.entries, nil
+	}
 	stdout, err := l.runner(ctx, []string{"ls-remote", "--heads", "origin", "agent/*"})
 	if err != nil {
 		return nil, &ErrLsRemoteFailed{Cause: err}
@@ -86,19 +102,40 @@ func ParseLsRemoteOutput(raw string) ([]port.WorktreeEntry, error) {
 			continue
 		}
 		branchPath := strings.TrimPrefix(ref, prefix) // e.g. "agent/themis/TAL-16"
-		segments := strings.SplitN(branchPath, "/", 3)
-		// segments[0]="agent", segments[1]=<figura>, segments[2]=<ticket>
-		if len(segments) < 3 || segments[0] != "agent" || segments[1] == "" || segments[2] == "" {
-			continue
+		if e, ok := entryFromBranchPath(branchPath); ok {
+			entries = append(entries, e)
 		}
-		figura := segments[1]
-		entries = append(entries, port.WorktreeEntry{
-			Figura: figura,
-			Branch: "origin/" + branchPath, // e.g. "origin/agent/themis/TAL-16"
-			Status: "active",
-		})
 	}
 	return entries, nil
+}
+
+// entriesFromBranchNames converts plain agent/* branch names (no refs/heads/ prefix) into entries,
+// dropping blanks and non-agent branches. Shared by NewListerFromBranches.
+func entriesFromBranchNames(branches []string) []port.WorktreeEntry {
+	var entries []port.WorktreeEntry
+	for _, b := range branches {
+		if e, ok := entryFromBranchPath(b); ok {
+			entries = append(entries, e)
+		}
+	}
+	return entries
+}
+
+// entryFromBranchPath builds a WorktreeEntry from an agent/<figura>/<ticket> branch path
+// (no refs/heads/ prefix). Returns ok=false when the path is not a well-formed agent branch.
+// Branch is "origin/"-prefixed so ChangedFiles diffs against the fetched remote-tracking ref.
+func entryFromBranchPath(branchPath string) (port.WorktreeEntry, bool) {
+	branchPath = strings.TrimSpace(branchPath)
+	segments := strings.SplitN(branchPath, "/", 3)
+	// segments[0]="agent", segments[1]=<figura>, segments[2]=<ticket>
+	if len(segments) < 3 || segments[0] != "agent" || segments[1] == "" || segments[2] == "" {
+		return port.WorktreeEntry{}, false
+	}
+	return port.WorktreeEntry{
+		Figura: segments[1],
+		Branch: "origin/" + branchPath,
+		Status: "active",
+	}, true
 }
 
 // realRunner returns a RunnerFunc that shells out to the real `git` binary with the given repoRoot as Dir.

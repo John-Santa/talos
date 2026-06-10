@@ -205,6 +205,71 @@ func TestLister_List_RunnerError(t *testing.T) {
 // TestLister_InterfaceCompliance is a compile-time assertion that *Lister satisfies port.WorktreeLister.
 var _ port.WorktreeLister = (*gitremote.Lister)(nil)
 
+// --- TAL-16 fix B (--branches): explicit open-PR branch set overrides git ls-remote. ---
+// `git ls-remote agent/*` returns stale squash-merged branches → false positives. The CI knows
+// the in-flight set (`gh pr list --state open`) and passes it via --branches; this lister builds
+// entries from that list directly, bypassing git, so stale branches are excluded by construction.
+
+// TestNewListerFromBranches_List_BuildsEntriesWithoutGit verifies the explicit-branch lister
+// returns ls-remote-shaped entries (Figura, origin/-prefixed Branch, Status=active) and never
+// shells out (a nil runner would panic if the git path were taken).
+func TestNewListerFromBranches_List_BuildsEntriesWithoutGit(t *testing.T) {
+	t.Parallel()
+
+	lister := gitremote.NewListerFromBranches([]string{"agent/themis/TAL-16", "agent/atlas/TAL-5"})
+	entries, err := lister.List(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []port.WorktreeEntry{
+		{Figura: "themis", Branch: "origin/agent/themis/TAL-16", Status: "active"},
+		{Figura: "atlas", Branch: "origin/agent/atlas/TAL-5", Status: "active"},
+	}
+	if len(entries) != len(want) {
+		t.Fatalf("expected %d entries, got %d (%+v)", len(want), len(entries), entries)
+	}
+	for i, w := range want {
+		if entries[i].Figura != w.Figura || entries[i].Branch != w.Branch || entries[i].Status != w.Status {
+			t.Errorf("entries[%d] = %+v, want %+v", i, entries[i], w)
+		}
+	}
+}
+
+// TestNewListerFromBranches_SkipsNonAgentAndBlank verifies non-agent refs, blanks and malformed
+// branch names are dropped — only well-formed agent/<figura>/<ticket> survive.
+func TestNewListerFromBranches_SkipsNonAgentAndBlank(t *testing.T) {
+	t.Parallel()
+
+	lister := gitremote.NewListerFromBranches([]string{
+		"agent/atlas/TAL-5", "main", "", "   ", "feature/x", "agent/incomplete",
+	})
+	entries, err := lister.List(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 valid agent entry, got %d (%+v)", len(entries), entries)
+	}
+	if entries[0].Figura != "atlas" {
+		t.Errorf("Figura = %q, want %q", entries[0].Figura, "atlas")
+	}
+}
+
+// TestNewListerFromBranches_Empty_NoEntries verifies an empty in-flight set yields zero claims
+// (no open PRs → no collision, exit 0 via ErrNoClaims upstream).
+func TestNewListerFromBranches_Empty_NoEntries(t *testing.T) {
+	t.Parallel()
+
+	lister := gitremote.NewListerFromBranches(nil)
+	entries, err := lister.List(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("expected 0 entries for empty list, got %d", len(entries))
+	}
+}
+
 // helpers
 
 func errSentinel(msg string) error {

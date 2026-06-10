@@ -75,6 +75,27 @@ func exitCodeFor(err error) int {
 	return 1
 }
 
+// errForBlock maps a BLOCK verdict to the sentinel error that exitCodeFor turns into exit 1.
+// Both the --json and the text path of check/scan return it, so the JSON branch no longer
+// swallows the verdict (a BLOCK with --json used to encode fine and exit 0, defanging the gate).
+// OK/SERIALIZE → nil (exit 0).
+func errForBlock(report overlap.Report) error {
+	if report.Verdict == overlap.VerdictBlock {
+		return &overlap.ErrSameFileParallel{}
+	}
+	return nil
+}
+
+// errForStrict maps an over-threshold metric to an error when --strict is set, mirroring the
+// text path of cmdMetric so `metric --json --strict` also exits 1 over threshold. Without
+// --strict (or under threshold) metric stays purely informational (exit 0).
+func errForStrict(report overlap.Report, strict bool, threshold float64) error {
+	if strict && report.OverThreshold {
+		return fmt.Errorf("collision rate %.4f exceeds threshold %.4f (--strict)", report.CollisionRate, threshold)
+	}
+	return nil
+}
+
 func repoRoot() string {
 	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
 	if err == nil {
@@ -259,6 +280,44 @@ func writeJSON(v any) error {
 	return enc.Encode(v)
 }
 
+// listerMode is the worktree-lister strategy chosen by cmdScan.
+type listerMode int
+
+const (
+	// modeWorktree lists local worktrees via the wt binary (default, no --remote).
+	modeWorktree listerMode = iota
+	// modeRemoteLsRemote discovers in-flight branches via `git ls-remote` (--remote, no --branches).
+	modeRemoteLsRemote
+	// modeRemoteExplicit uses the explicit --branches set (the open-PR list from CI).
+	modeRemoteExplicit
+)
+
+// scanListerMode picks the lister strategy. An explicitly-set --branches (branchesSet) selects the
+// explicit set EVEN WHEN EMPTY — CI passing an empty list means "zero open PRs, scan nothing", which
+// must NOT fall back to ls-remote and its stale squash-merged branches. --branches without --remote
+// is ignored (worktree mode).
+func scanListerMode(remote, branchesSet bool) listerMode {
+	switch {
+	case remote && branchesSet:
+		return modeRemoteExplicit
+	case remote:
+		return modeRemoteLsRemote
+	default:
+		return modeWorktree
+	}
+}
+
+// splitCSV splits a comma-separated flag value into trimmed, non-empty items.
+func splitCSV(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 func readLines(path string) ([]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -320,14 +379,14 @@ func cmdCheck(args []string) error {
 	}
 
 	if *jsonOut {
-		return writeJSON(reportToCheckJSON(report))
+		if err := writeJSON(reportToCheckJSON(report)); err != nil {
+			return err
+		}
+		return errForBlock(report)
 	}
 
 	fmt.Printf("verdict: %s\n", verdictString(report.Verdict))
-	if report.Verdict == overlap.VerdictBlock {
-		return &overlap.ErrSameFileParallel{}
-	}
-	return nil
+	return errForBlock(report)
 }
 
 func cmdScan(args []string) error {
@@ -336,6 +395,7 @@ func cmdScan(args []string) error {
 	wtBin := fs.String("wt-bin", "wt", "wt binary name on PATH")
 	noFetch := fs.Bool("no-fetch", false, "Skip initial fetch")
 	remote := fs.Bool("remote", false, "Detect collisions via real diffs of remote agent/* branches (CI-friendly, no worktrees)")
+	branches := fs.String("branches", "", "Comma-separated agent/* branches to scan (with --remote: overrides git ls-remote with the open-PR set, e.g. from `gh pr list --state open --json headRefName`)")
 	jsonOut := fs.Bool("json", false, "Output as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -353,10 +413,23 @@ func cmdScan(args []string) error {
 
 	inspector := gitcli.NewInspector(root)
 
+	// Distinguish "--branches not given" from "--branches given but empty" (CI: zero open PRs).
+	branchesSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "branches" {
+			branchesSet = true
+		}
+	})
+
 	var lister port.WorktreeLister
-	if *remote {
+	switch scanListerMode(*remote, branchesSet) {
+	case modeRemoteExplicit:
+		// CI supplies the in-flight set (open PRs) via --branches; bypass ls-remote so
+		// stale squash-merged branches don't cause false-positive collisions. Empty set → no claims.
+		lister = gitremote.NewListerFromBranches(splitCSV(*branches))
+	case modeRemoteLsRemote:
 		lister = gitremote.NewLister(root)
-	} else {
+	default:
 		lister = wtcli.NewLister(*wtBin)
 	}
 
@@ -369,14 +442,14 @@ func cmdScan(args []string) error {
 	}
 
 	if *jsonOut {
-		return writeJSON(reportToScanJSON(report))
+		if err := writeJSON(reportToScanJSON(report)); err != nil {
+			return err
+		}
+		return errForBlock(report)
 	}
 
 	fmt.Printf("verdict: %s\n", verdictString(report.Verdict))
-	if report.Verdict == overlap.VerdictBlock {
-		return &overlap.ErrSameFileParallel{}
-	}
-	return nil
+	return errForBlock(report)
 }
 
 func cmdMetric(args []string) error {
@@ -413,14 +486,14 @@ func cmdMetric(args []string) error {
 	}
 
 	if *jsonOut {
-		return writeJSON(reportToMetricJSON(report, *threshold))
+		if err := writeJSON(reportToMetricJSON(report, *threshold)); err != nil {
+			return err
+		}
+		return errForStrict(report, *strict, *threshold)
 	}
 
 	fmt.Printf("collision_rate: %.4f  threshold: %.4f  over: %v\n",
 		report.CollisionRate, *threshold, report.OverThreshold)
 
-	if *strict && report.OverThreshold {
-		return fmt.Errorf("collision rate %.4f exceeds threshold %.4f (--strict)", report.CollisionRate, *threshold)
-	}
-	return nil
+	return errForStrict(report, *strict, *threshold)
 }
