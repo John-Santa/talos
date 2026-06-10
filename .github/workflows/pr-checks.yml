@@ -107,18 +107,30 @@ jobs:
       - name: Build ov
         working-directory: platform/overlap-guard
         run: go build -o /tmp/ov ./cmd/ov
-      - name: Fetch in-flight agent branches
-        # The default PR checkout does not bring origin/agent/* remote-tracking refs; ov's
-        # three-dot diff needs them, so widen the refspec explicitly (base ref is already present).
-        run: git fetch origin '+refs/heads/agent/*:refs/remotes/origin/agent/*'
+      - name: Fetch base and in-flight agent branches
+        # ov diffs each open-PR head (origin/agent/*) three-dot against the base. Fetch BOTH explicitly
+        # so the scan never rests on an assumption about what the PR checkout left behind.
+        run: |
+          git fetch origin \
+            "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" \
+            '+refs/heads/agent/*:refs/remotes/origin/agent/*'
       - name: Cross open-PR diffs for file collisions
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # In-flight set = open PR head branches. Passing it explicitly keeps ov git-only and
-          # excludes stale branches. Empty (no open PRs) → ErrNoClaims → exit 0.
-          BRANCHES=$(gh pr list --state open --json headRefName -q '[.[].headRefName] | join(",")')
+          # In-flight set = OPEN PR head branches. --limit high so a busy repo never SILENTLY
+          # truncates (gh defaults to 30): a dropped colliding PR would be a false GREEN on a hard gate.
+          BRANCHES=$(gh pr list --state open --limit 1000 --json headRefName -q '[.[].headRefName] | join(",")')
           echo "In-flight branches: ${BRANCHES:-<none>}"
+          # Fail-closed sentinel: THIS PR is always open, so it MUST appear in the list. If it doesn't,
+          # gh failed / returned a partial-or-empty result — do NOT let that pass as "no collisions"
+          # (an empty --branches would otherwise mean ErrNoClaims → exit 0, silently disabling the gate).
+          case ",$BRANCHES," in
+            *",$GITHUB_HEAD_REF,"*) : ;;
+            *) echo "::error::open-PR list missing this PR's branch ($GITHUB_HEAD_REF) — gh pr list failed or truncated"; exit 1 ;;
+          esac
+          # HG6 guards agent/*-to-agent/* collisions (branch-name enforces every PR is an agent branch);
+          # ov drops any non-agent head by construction. Drafts count — they still claim files.
           /tmp/ov scan --remote --branches "$BRANCHES" --base "origin/${{ github.base_ref }}" --no-fetch
 
   judgment:
