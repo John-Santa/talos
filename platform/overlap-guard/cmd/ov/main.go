@@ -3,7 +3,7 @@
 // Usage:
 //
 //	ov check  --module M --agent A [--files-file f] [--site-url url] [--max-results N] [--json]
-//	ov scan   [--base develop] [--wt-bin wt] [--no-fetch] [--ownership-file f] [--json]
+//	ov scan   [--base develop] [--wt-bin wt] [--no-fetch] [--remote] [--branches csv] [--json]
 //	ov metric [--threshold 0.15] [--strict] [--base develop] [--wt-bin wt] [--no-fetch] [--json]
 package main
 
@@ -13,6 +13,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -274,10 +275,51 @@ func pairKey(a, b string) string {
 	return b + "|" + a
 }
 
-func writeJSON(v any) error {
-	enc := json.NewEncoder(os.Stdout)
+// writeJSONTo encodes v as indented JSON to w. The result-emitting helpers below write through it so
+// they are testable against a buffer (the original gate-defeating bug lived in the emit wiring, not the helpers).
+func writeJSONTo(w io.Writer, v any) error {
+	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)
+}
+
+// emitCheckResult writes the check report (JSON or text) to w and returns the verdict error.
+// BOTH paths return errForBlock(report), so --json never swallows a BLOCK verdict (the gate-defeating
+// bug this change fixes). JSON is written BEFORE the error is returned, so stdout stays valid JSON.
+func emitCheckResult(w io.Writer, report overlap.Report, jsonOut bool) error {
+	if jsonOut {
+		if err := writeJSONTo(w, reportToCheckJSON(report)); err != nil {
+			return err
+		}
+		return errForBlock(report)
+	}
+	fmt.Fprintf(w, "verdict: %s\n", verdictString(report.Verdict))
+	return errForBlock(report)
+}
+
+// emitScanResult writes the scan report (JSON or text) to w and returns the verdict error (both paths).
+func emitScanResult(w io.Writer, report overlap.Report, jsonOut bool) error {
+	if jsonOut {
+		if err := writeJSONTo(w, reportToScanJSON(report)); err != nil {
+			return err
+		}
+		return errForBlock(report)
+	}
+	fmt.Fprintf(w, "verdict: %s\n", verdictString(report.Verdict))
+	return errForBlock(report)
+}
+
+// emitMetricResult writes the metric report (JSON or text) to w and returns the --strict error (both paths).
+func emitMetricResult(w io.Writer, report overlap.Report, jsonOut, strict bool, threshold float64) error {
+	if jsonOut {
+		if err := writeJSONTo(w, reportToMetricJSON(report, threshold)); err != nil {
+			return err
+		}
+		return errForStrict(report, strict, threshold)
+	}
+	fmt.Fprintf(w, "collision_rate: %.4f  threshold: %.4f  over: %v\n",
+		report.CollisionRate, threshold, report.OverThreshold)
+	return errForStrict(report, strict, threshold)
 }
 
 // listerMode is the worktree-lister strategy chosen by cmdScan.
@@ -378,15 +420,7 @@ func cmdCheck(args []string) error {
 		return err
 	}
 
-	if *jsonOut {
-		if err := writeJSON(reportToCheckJSON(report)); err != nil {
-			return err
-		}
-		return errForBlock(report)
-	}
-
-	fmt.Printf("verdict: %s\n", verdictString(report.Verdict))
-	return errForBlock(report)
+	return emitCheckResult(os.Stdout, report, *jsonOut)
 }
 
 func cmdScan(args []string) error {
@@ -441,15 +475,7 @@ func cmdScan(args []string) error {
 		return err
 	}
 
-	if *jsonOut {
-		if err := writeJSON(reportToScanJSON(report)); err != nil {
-			return err
-		}
-		return errForBlock(report)
-	}
-
-	fmt.Printf("verdict: %s\n", verdictString(report.Verdict))
-	return errForBlock(report)
+	return emitScanResult(os.Stdout, report, *jsonOut)
 }
 
 func cmdMetric(args []string) error {
@@ -476,6 +502,8 @@ func cmdMetric(args []string) error {
 	}
 
 	inspector := gitcli.NewInspector(root)
+	// metric is the local HG6 collision-rate informer; --remote/--branches are intentionally out of
+	// scope here (the hard CI gate is `scan --remote --branches`). metric always uses local worktrees.
 	lister := wtcli.NewLister(*wtBin)
 	guard := service.NewGuard(nil, lister, inspector, cfg)
 
@@ -485,15 +513,5 @@ func cmdMetric(args []string) error {
 		return err
 	}
 
-	if *jsonOut {
-		if err := writeJSON(reportToMetricJSON(report, *threshold)); err != nil {
-			return err
-		}
-		return errForStrict(report, *strict, *threshold)
-	}
-
-	fmt.Printf("collision_rate: %.4f  threshold: %.4f  over: %v\n",
-		report.CollisionRate, *threshold, report.OverThreshold)
-
-	return errForStrict(report, *strict, *threshold)
+	return emitMetricResult(os.Stdout, report, *jsonOut, *strict, *threshold)
 }

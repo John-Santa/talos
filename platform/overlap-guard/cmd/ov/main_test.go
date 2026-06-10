@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -8,6 +9,29 @@ import (
 
 	"github.com/John-Santa/talos/platform/overlap-guard/domain/overlap"
 )
+
+// blockReport builds a report whose verdict is BLOCK (two distinct agents, same file).
+func blockReport(t *testing.T) overlap.Report {
+	t.Helper()
+	a := overlap.NewClaim("atlas", "mod:core", "branch-a", []string{"shared.go"}, overlap.SourceActual)
+	b := overlap.NewClaim("hermes", "mod:core", "branch-b", []string{"shared.go"}, overlap.SourceActual)
+	r := overlap.NewReport([]overlap.Claim{a, b}, 0.15)
+	if r.Verdict != overlap.VerdictBlock {
+		t.Fatalf("precondition: want BLOCK, got %v", r.Verdict)
+	}
+	return r
+}
+
+// okReport builds a report whose verdict is OK (single claim, no pairs).
+func okReport(t *testing.T) overlap.Report {
+	t.Helper()
+	a := overlap.NewClaim("atlas", "mod:core", "branch-a", []string{"a.go"}, overlap.SourceActual)
+	r := overlap.NewReport([]overlap.Claim{a}, 0.15)
+	if r.Verdict != overlap.VerdictOK {
+		t.Fatalf("precondition: want OK, got %v", r.Verdict)
+	}
+	return r
+}
 
 // TestRun_UnknownSubcommand verifies that an unknown subcommand returns an error.
 func TestRun_UnknownSubcommand(t *testing.T) {
@@ -350,5 +374,116 @@ func TestErrForStrict_UnderThresholdStrict_ReturnsNil(t *testing.T) {
 	}
 	if err := errForStrict(report, true, 0.15); err != nil {
 		t.Errorf("errForStrict(under, strict=true) = %v, want nil", err)
+	}
+}
+
+// --- TAL-16 fix A (exit code) WIRING: lock the call sites, not just the helpers. ---
+// ARGOS Round 1: the original bug lived in the --json branch of the command handlers, not in a
+// helper. These tests exercise emit{Check,Scan,Metric}Result directly, so a future revert of a
+// --json branch to "just writeJSON()" (dropping the verdict error) goes RED. stdout must also
+// stay valid JSON (a CI consumer parses it) while the error still propagates to exit 1.
+
+// TestEmitScanResult_JSONBlock_ErrorsButEmitsValidJSON — the headline regression lock for scan.
+func TestEmitScanResult_JSONBlock_ErrorsButEmitsValidJSON(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	err := emitScanResult(&buf, blockReport(t), true)
+	if err == nil {
+		t.Fatal("emitScanResult(json, BLOCK) = nil, want non-nil error (exit 1)")
+	}
+	if got := exitCodeFor(err); got != 1 {
+		t.Errorf("exitCodeFor = %d, want 1", got)
+	}
+	var got scanOnlyJSON
+	if e := json.Unmarshal(buf.Bytes(), &got); e != nil {
+		t.Fatalf("stdout is not valid JSON: %v\n%s", e, buf.String())
+	}
+	if got.Verdict != "BLOCK" {
+		t.Errorf("json verdict = %q, want BLOCK", got.Verdict)
+	}
+}
+
+// TestEmitScanResult_JSONOK_NilAndValidJSON — OK verdict under --json: no error, valid JSON.
+func TestEmitScanResult_JSONOK_NilAndValidJSON(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	if err := emitScanResult(&buf, okReport(t), true); err != nil {
+		t.Errorf("emitScanResult(json, OK) = %v, want nil", err)
+	}
+	var got scanOnlyJSON
+	if e := json.Unmarshal(buf.Bytes(), &got); e != nil {
+		t.Fatalf("stdout is not valid JSON: %v", e)
+	}
+	if got.Verdict != "OK" {
+		t.Errorf("json verdict = %q, want OK", got.Verdict)
+	}
+}
+
+// TestEmitScanResult_TextBlock_Errors — the text path also returns the verdict error.
+func TestEmitScanResult_TextBlock_Errors(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	if err := emitScanResult(&buf, blockReport(t), false); err == nil {
+		t.Fatal("emitScanResult(text, BLOCK) = nil, want error")
+	}
+	if !strings.Contains(buf.String(), "BLOCK") {
+		t.Errorf("text output = %q, want it to mention BLOCK", buf.String())
+	}
+}
+
+// TestEmitCheckResult_JSONBlock_ErrorsButEmitsValidJSON — same wiring lock for check.
+func TestEmitCheckResult_JSONBlock_ErrorsButEmitsValidJSON(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	if err := emitCheckResult(&buf, blockReport(t), true); err == nil {
+		t.Fatal("emitCheckResult(json, BLOCK) = nil, want non-nil error (exit 1)")
+	}
+	var got checkOnlyJSON
+	if e := json.Unmarshal(buf.Bytes(), &got); e != nil {
+		t.Fatalf("stdout is not valid JSON: %v", e)
+	}
+	if got.Verdict != "BLOCK" {
+		t.Errorf("json verdict = %q, want BLOCK", got.Verdict)
+	}
+}
+
+// TestEmitMetricResult_JSONOverStrict_Errors — metric --json --strict over threshold exits 1.
+func TestEmitMetricResult_JSONOverStrict_Errors(t *testing.T) {
+	t.Parallel()
+	report := blockReport(t) // collision rate 1.0 > 0.15 → OverThreshold
+	if !report.OverThreshold {
+		t.Fatalf("precondition: want OverThreshold true, got false")
+	}
+	var buf bytes.Buffer
+	if err := emitMetricResult(&buf, report, true, true, 0.15); err == nil {
+		t.Fatal("emitMetricResult(json, over, strict) = nil, want error")
+	}
+	var got metricOnlyJSON
+	if e := json.Unmarshal(buf.Bytes(), &got); e != nil {
+		t.Fatalf("stdout is not valid JSON: %v", e)
+	}
+	if !got.OverThreshold {
+		t.Errorf("json over_threshold = false, want true")
+	}
+}
+
+// TestEmitMetricResult_JSONOverNotStrict_NilButValidJSON — without --strict, metric stays informational.
+func TestEmitMetricResult_JSONOverNotStrict_NilButValidJSON(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	if err := emitMetricResult(&buf, blockReport(t), true, false, 0.15); err != nil {
+		t.Errorf("emitMetricResult(json, over, not-strict) = %v, want nil", err)
+	}
+	var got metricOnlyJSON
+	if e := json.Unmarshal(buf.Bytes(), &got); e != nil {
+		t.Fatalf("stdout is not valid JSON: %v", e)
+	}
+}
+
+// TestRun_ScanBranches_FlagMustBeDeclared — mirror of the --remote flag-declared guard for --branches.
+func TestRun_ScanBranches_FlagMustBeDeclared(t *testing.T) {
+	err := run([]string{"scan", "--remote", "--branches", "agent/x/TAL-1", "--no-fetch", "--base", "origin/develop"})
+	if err != nil && strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("--branches flag not declared in cmdScan: %v", err)
 	}
 }

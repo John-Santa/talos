@@ -37,8 +37,9 @@ type RunnerFunc func(ctx context.Context, args []string) (string, error)
 //     touches git — used by `ov scan --remote --branches`, where CI supplies the open-PR set
 //     (`gh pr list`) so stale squash-merged branches are excluded by construction.
 type Lister struct {
-	runner  RunnerFunc
-	entries []port.WorktreeEntry // explicit mode: returned verbatim when runner is nil
+	runner   RunnerFunc
+	entries  []port.WorktreeEntry // explicit mode: returned verbatim
+	explicit bool                 // true → return entries directly, never shell out (NewListerFromBranches)
 }
 
 var _ port.WorktreeLister = (*Lister)(nil)
@@ -59,16 +60,18 @@ func NewListerWithRunner(runner RunnerFunc) *Lister {
 // `git ls-remote`, so stale squash-merged branches that ls-remote would surface are excluded.
 // Blank and non-agent branch names are dropped.
 func NewListerFromBranches(branches []string) *Lister {
-	return &Lister{entries: entriesFromBranchNames(branches)}
+	return &Lister{entries: entriesFromBranchNames(branches), explicit: true}
 }
 
 // List returns one WorktreeEntry per in-flight agent branch. In explicit mode (runner nil) it
 // returns the precomputed set; otherwise it runs `git ls-remote --heads origin agent/*`.
 // Branch is stored as "origin/<branch>" so ChangedFiles(baseSHA, entry.Branch) works after fetch.
 func (l *Lister) List(ctx context.Context) ([]port.WorktreeEntry, error) {
-	if l.runner == nil {
+	if l.explicit {
 		return l.entries, nil
 	}
+	// ls-remote mode. A nil runner here is a constructor bug, not "all clear": fail loud rather than
+	// silently returning zero claims on a hard gate.
 	stdout, err := l.runner(ctx, []string{"ls-remote", "--heads", "origin", "agent/*"})
 	if err != nil {
 		return nil, &ErrLsRemoteFailed{Cause: err}
