@@ -7,6 +7,23 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// ─── Layout mode ──────────────────────────────────────────────────────────────
+
+// LayoutMode controls which panel arrangement the TUI renders.
+type LayoutMode int
+
+const (
+	// LayoutMasterDetail is the default: full-width worktree list.
+	LayoutMasterDetail LayoutMode = iota
+	// LayoutOverview shows three panels: worktrees, merge-order, overlap.
+	LayoutOverview
+)
+
+// cycleLayout advances to the next layout, wrapping around.
+func cycleLayout(l LayoutMode) LayoutMode {
+	return (l + 1) % 2
+}
+
 // ─── Custom messages ──────────────────────────────────────────────────────────
 
 // SnapshotMsg is delivered to the Model when the async Aggregator.Snapshot call
@@ -29,6 +46,8 @@ type Model struct {
 	Cursor int
 	// Loading is true from construction until the first SnapshotMsg arrives.
 	Loading bool
+	// Layout controls which panel arrangement is rendered.
+	Layout LayoutMode
 }
 
 // New constructs the initial Model connected to agg.
