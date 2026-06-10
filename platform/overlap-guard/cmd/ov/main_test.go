@@ -606,8 +606,10 @@ func TestRunScan_SourceError_Propagates(t *testing.T) {
 }
 
 // TestRunScan_RealGuardExplicitBranches_BlockExit1 is the full-gate integration lock: the explicit
-// open-PR set flows NewListerFromBranches → Guard.ScanInFlight → figuraFromBranch → emit → exit code,
-// with only the git inspector mocked. Two open PRs touching shared.go → BLOCK → exit 1 + valid JSON.
+// open-PR set flows NewListerFromBranches → Guard.ScanInFlight → emit → exit code, with only the git
+// inspector mocked. Two open PRs touching shared.go → BLOCK → exit 1 + valid JSON. (figuraFromBranch's
+// origin/-stripping is locked separately by TestGuard_ScanInFlight_RemoteBranches_DeriveAgentFromBranch,
+// which uses an empty Figura so the agent identity must be derived from the branch.)
 func TestRunScan_RealGuardExplicitBranches_BlockExit1(t *testing.T) {
 	t.Parallel()
 

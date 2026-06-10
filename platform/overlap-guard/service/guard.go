@@ -65,6 +65,9 @@ func (g *Guard) ScanInFlight(ctx context.Context) (overlap.Report, error) {
 		claims = append(claims, overlap.NewClaim(agent, "", e.Branch, files, overlap.SourceActual))
 	}
 
+	// Defensive: the hasActive short-circuit above already returns ErrNoClaims for an empty in-flight
+	// set, and every active entry appends a claim — so today this is belt-and-suspenders. Kept so a
+	// future loop that skips entries can't silently produce an empty (false-OK) report on a hard gate.
 	if len(claims) == 0 {
 		return overlap.Report{}, &overlap.ErrNoClaims{}
 	}
