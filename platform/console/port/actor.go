@@ -6,7 +6,6 @@ import "context"
 // It provides mutating operations on the TALOS platform.
 //
 // Actions to be added in later slices:
-//   - ExecuteMerge(ctx context.Context, figura, jiraKey string) error
 //   - TransitionIssue(ctx context.Context, jiraKey, transition string) error
 //   - RunEvidence(ctx context.Context, jiraKey string) error
 type PlatformActor interface {
@@ -19,4 +18,10 @@ type PlatformActor interface {
 	// CreateWorktree creates a new worktree for the given agent figura and
 	// Jira issue key by invoking `wt create <figura> <jiraKey>`.
 	CreateWorktree(ctx context.Context, figura, jiraKey string) error
+
+	// ExecuteMerge executes the merge plan by invoking `mo execute --yes`.
+	// This is a destructive operation: it merges all ready branches into the
+	// base branch. The caller is responsible for confirming intent before
+	// dispatching this action.
+	ExecuteMerge(ctx context.Context) error
 }

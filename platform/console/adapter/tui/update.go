@@ -51,6 +51,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "n":
 			m, cmd := m.openCreateModal()
 			return m, cmd
+		case "m":
+			m, cmd := m.openExecuteModal()
+			return m, cmd
 		}
 		return m, nil
 
@@ -94,10 +97,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // updateModal dispatches key events to the right modal handler based on ModalMode.
 func (m Model) updateModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.ModalMode == ModalModeCreate {
+	switch m.ModalMode {
+	case ModalModeCreate:
 		return m.updateCreateModal(msg)
+	case ModalModeExecute:
+		return m.updateExecuteModal(msg)
+	default:
+		return m.updateConfirmModal(msg)
 	}
-	return m.updateConfirmModal(msg)
 }
 
 // updateConfirmModal handles key events for the yes/no confirmation dialog.
@@ -218,6 +225,66 @@ func (m Model) openCreateModal() (Model, tea.Cmd) {
 	m.ModalMode = ModalModeCreate
 	m.ModalTitle = "New worktree"
 	cmd := m.CreateFiguraInput.Focus()
+	return m, cmd
+}
+
+// ─── Modal open helpers ───────────────────────────────────────────────────────
+
+// ─── Execute-merge modal ──────────────────────────────────────────────────────
+
+// updateExecuteModal handles key events while the execute-merge type-to-confirm
+// modal is open.
+// Enter attempts confirm — blocked when typed token != BaseBranch.
+// Esc cancels.
+// All other keys are forwarded to ExecuteTokenInput.
+func (m Model) updateExecuteModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.ModalActive = false
+		m.ExecuteTokenInput.Blur()
+		return m, nil
+
+	case tea.KeyEnter:
+		if m.ExecuteTokenInput.Value() != m.modalBaseBranch {
+			// Wrong token — keep modal open, no cmd.
+			return m, nil
+		}
+		return m.confirmExecuteModal()
+	}
+
+	// Forward all other keys to the token input.
+	var cmd tea.Cmd
+	m.ExecuteTokenInput, cmd = m.ExecuteTokenInput.Update(msg)
+	return m, cmd
+}
+
+// confirmExecuteModal closes the execute modal and dispatches the async merge command.
+func (m Model) confirmExecuteModal() (tea.Model, tea.Cmd) {
+	m.ModalActive = false
+	m.ExecuteTokenInput.Blur()
+	actor := m.actor
+	cmd := func() tea.Msg {
+		err := actor.ExecuteMerge(context.Background())
+		return ActionResultMsg{Err: err}
+	}
+	return m, cmd
+}
+
+// openExecuteModal resets the token input, focuses it, and opens the execute modal.
+// It is a no-op when actor is nil or when there is no merge plan.
+func (m Model) openExecuteModal() (Model, tea.Cmd) {
+	if m.actor == nil {
+		return m, nil
+	}
+	if m.Snap.MergePlan.BaseBranch == "" && len(m.Snap.MergePlan.Steps) == 0 {
+		return m, nil
+	}
+	m.modalBaseBranch = m.Snap.MergePlan.BaseBranch
+	m.ExecuteTokenInput.SetValue("")
+	m.ModalActive = true
+	m.ModalMode = ModalModeExecute
+	m.ModalTitle = "Execute merge"
+	cmd := m.ExecuteTokenInput.Focus()
 	return m, cmd
 }
 

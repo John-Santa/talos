@@ -38,7 +38,7 @@ func TestActor_TeardownWorktree_HappyPath(t *testing.T) {
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+origPath)
 
-	a := cli.NewActor("wt")
+	a := cli.NewActor("wt", "mo")
 	if err := a.TeardownWorktree(context.Background(), "iris", "TAL-18"); err != nil {
 		t.Fatalf("TeardownWorktree: unexpected error: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestActor_TeardownWorktree_NonZeroExit(t *testing.T) {
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+origPath)
 
-	a := cli.NewActor("wt")
+	a := cli.NewActor("wt", "mo")
 	err := a.TeardownWorktree(context.Background(), "iris", "TAL-18")
 	if err == nil {
 		t.Fatal("expected error on non-zero exit, got nil")
@@ -69,7 +69,7 @@ func TestActor_TeardownWorktree_NonZeroExit(t *testing.T) {
 func TestActor_TeardownWorktree_BinaryNotFound(t *testing.T) {
 	t.Parallel()
 
-	a := cli.NewActor("wt-does-not-exist-actor-test-only")
+	a := cli.NewActor("wt-does-not-exist-actor-test-only", "mo")
 	err := a.TeardownWorktree(context.Background(), "iris", "TAL-18")
 	if err == nil {
 		t.Fatal("expected error when wt binary missing, got nil")
@@ -101,7 +101,7 @@ func TestActor_CreateWorktree_HappyPath(t *testing.T) {
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+origPath)
 
-	a := cli.NewActor("wt")
+	a := cli.NewActor("wt", "mo")
 	if err := a.CreateWorktree(context.Background(), "iris", "TAL-19"); err != nil {
 		t.Fatalf("CreateWorktree: unexpected error: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestActor_CreateWorktree_NonZeroExit(t *testing.T) {
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+origPath)
 
-	a := cli.NewActor("wt")
+	a := cli.NewActor("wt", "mo")
 	err := a.CreateWorktree(context.Background(), "iris", "TAL-19")
 	if err == nil {
 		t.Fatal("expected error on non-zero exit, got nil")
@@ -162,4 +162,67 @@ func splitLines(s string) []string {
 		out = append(out, s[start:])
 	}
 	return out
+}
+
+// ─── ExecuteMerge ─────────────────────────────────────────────────────────────
+
+// TestActor_ExecuteMerge_HappyPath verifies that ExecuteMerge returns nil when
+// the mo binary exits 0 and is called with the correct args.
+func TestActor_ExecuteMerge_HappyPath(t *testing.T) {
+	// t.Parallel() intentionally absent: t.Setenv incompatible with t.Parallel in Go 1.26.
+
+	dir := t.TempDir()
+	argsFile := filepath.Join(dir, "mo-args.txt")
+	writeFakeWtBinaryRecordsArgs(t, dir, "mo", argsFile)
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+origPath)
+
+	a := cli.NewActor("wt", "mo")
+	if err := a.ExecuteMerge(context.Background()); err != nil {
+		t.Fatalf("ExecuteMerge: unexpected error: %v", err)
+	}
+
+	// Verify args: must be exactly "execute" "--yes".
+	// mo execute defaults --base to "develop"; the TUI does not override it.
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("reading args file: %v", err)
+	}
+	lines := splitLines(string(raw))
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 args (execute --yes), got %d: %v", len(lines), lines)
+	}
+	if lines[0] != "execute" {
+		t.Errorf("arg[0] = %q, want %q", lines[0], "execute")
+	}
+	// --yes must be present — mo execute refuses without it.
+	hasYes := false
+	for _, l := range lines {
+		if l == "--yes" {
+			hasYes = true
+		}
+	}
+	if !hasYes {
+		t.Errorf("expected --yes flag in args; got: %v", lines)
+	}
+}
+
+// TestActor_ExecuteMerge_NonZeroExit verifies that ExecuteMerge returns
+// ErrActionFailed when the mo binary exits non-zero.
+func TestActor_ExecuteMerge_NonZeroExit(t *testing.T) {
+	// t.Parallel() intentionally absent: t.Setenv incompatible with t.Parallel in Go 1.26.
+
+	dir := t.TempDir()
+	writeFakeWtBinaryNonZero(t, dir, "mo")
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+origPath)
+
+	a := cli.NewActor("wt", "mo")
+	err := a.ExecuteMerge(context.Background())
+	if err == nil {
+		t.Fatal("expected error on non-zero exit, got nil")
+	}
+	if !errors.Is(err, cli.ErrActionFailed) {
+		t.Errorf("want errors.Is(err, ErrActionFailed); got %v", err)
+	}
 }
