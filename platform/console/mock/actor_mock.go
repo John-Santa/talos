@@ -17,6 +17,9 @@ type PlatformActorMock struct {
 
 	// CreateErr is the error returned by CreateWorktree (nil = success).
 	CreateErr error
+
+	// ExecuteErr is the error returned by ExecuteMerge (nil = success).
+	ExecuteErr error
 }
 
 // compile-time check: PlatformActorMock must satisfy port.PlatformActor.
@@ -71,4 +74,10 @@ func (m *PlatformActorMock) TeardownWorktree(_ context.Context, figura, jiraKey 
 func (m *PlatformActorMock) CreateWorktree(_ context.Context, figura, jiraKey string) error {
 	m.Calls = append(m.Calls, Call{Method: "CreateWorktree", Args: []any{figura, jiraKey}})
 	return m.CreateErr
+}
+
+// ExecuteMerge records the call and returns the programmed ExecuteErr.
+func (m *PlatformActorMock) ExecuteMerge(_ context.Context) error {
+	m.Calls = append(m.Calls, Call{Method: "ExecuteMerge", Args: []any{}})
+	return m.ExecuteErr
 }

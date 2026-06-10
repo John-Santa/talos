@@ -18,7 +18,7 @@ import (
 
 func main() {
 	reader := cli.NewReader("wt", "mo", "ov", "ch")
-	actor := cli.NewActor("wt")
+	actor := cli.NewActor("wt", "mo")
 	agg := service.NewAggregator(reader)
 	m := tui.NewWithActor(agg, actor)
 

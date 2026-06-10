@@ -29,6 +29,9 @@ func (m Model) View() string {
 		if m.ModalMode == ModalModeCreate {
 			return m.overlayCreateModal(base)
 		}
+		if m.ModalMode == ModalModeExecute {
+			return m.overlayExecuteModal(base)
+		}
 		return m.overlayModal(base)
 	}
 	return base
@@ -450,6 +453,68 @@ func (m Model) overlayModal(base string) string {
 
 	// Place the modal box centered over the terminal canvas.
 	// The whitespace fill uses colorBase so the box floats over a dark backdrop.
+	return lipgloss.Place(w+4, h, lipgloss.Center, lipgloss.Center, box,
+		lipgloss.WithWhitespaceChars(" "),
+		lipgloss.WithWhitespaceForeground(colorBase),
+	)
+}
+
+// ─── Execute-merge modal ──────────────────────────────────────────────────────
+
+// overlayExecuteModal renders the type-to-confirm execute-merge modal centered
+// over base. It shows a plan summary from m.Snap.MergePlan plus the token input
+// that must match the base branch before the user can confirm.
+func (m Model) overlayExecuteModal(base string) string {
+	w := m.effectiveWidth()
+	h := m.Height
+	if h <= 0 {
+		h = 30
+	}
+
+	titleLine := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(colorMauve).
+		Render("Execute merge")
+
+	plan := m.Snap.MergePlan
+
+	summaryBase := m.Theme.Subtle.Render(fmt.Sprintf("base: %s", plan.BaseBranch))
+	summaryRate := m.Theme.Subtle.Render(fmt.Sprintf("conflict rate: %.0f%%  (threshold %.0f%%)",
+		plan.ConflictRate*100, plan.Threshold*100))
+	summarySteps := m.Theme.Subtle.Render(fmt.Sprintf("%d step(s)", len(plan.Steps)))
+
+	tokenField := m.ExecuteTokenInput.View()
+
+	// Hint changes depending on whether the typed token matches the base branch.
+	var hint string
+	if typed := m.ExecuteTokenInput.Value(); typed != "" && typed == plan.BaseBranch {
+		hint = m.Theme.StatusOK.Render(
+			fmt.Sprintf(`type "%s" to confirm   [enter] confirm   [esc] cancel`, plan.BaseBranch))
+	} else {
+		hint = m.Theme.Subtle.Render(
+			fmt.Sprintf(`type "%s" to confirm   [enter] confirm   [esc] cancel`, plan.BaseBranch))
+	}
+
+	inner := strings.Join([]string{
+		titleLine,
+		"",
+		summaryBase,
+		summaryRate,
+		summarySteps,
+		"",
+		tokenField,
+		"",
+		hint,
+	}, "\n")
+
+	boxStyle := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(colorLavender).
+		Padding(1, 3).
+		Width(w / 2)
+
+	box := boxStyle.Render(inner)
+
 	return lipgloss.Place(w+4, h, lipgloss.Center, lipgloss.Center, box,
 		lipgloss.WithWhitespaceChars(" "),
 		lipgloss.WithWhitespaceForeground(colorBase),

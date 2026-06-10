@@ -81,3 +81,29 @@ func TestPlatformActorMock_CreateWorktree_ReturnsProgrammedError(t *testing.T) {
 
 	m.AssertCallCount(t, "CreateWorktree", 1)
 }
+
+// ─── ExecuteMerge ─────────────────────────────────────────────────────────────
+
+func TestPlatformActorMock_ExecuteMerge_RecordsCall(t *testing.T) {
+	m := mock.NewPlatformActorMock()
+
+	if err := m.ExecuteMerge(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m.AssertCallCount(t, "ExecuteMerge", 1)
+}
+
+func TestPlatformActorMock_ExecuteMerge_ReturnsProgrammedError(t *testing.T) {
+	// Triangulate: ExecuteErr is returned as-is.
+	m := mock.NewPlatformActorMock()
+	want := errors.New("mo execute: conflict detected")
+	m.ExecuteErr = want
+
+	err := m.ExecuteMerge(context.Background())
+	if !errors.Is(err, want) {
+		t.Errorf("want errors.Is(err, want); got %v", err)
+	}
+
+	m.AssertCallCount(t, "ExecuteMerge", 1)
+}

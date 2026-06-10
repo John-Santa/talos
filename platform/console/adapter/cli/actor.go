@@ -39,15 +39,16 @@ func runCmd(ctx context.Context, bin string, args ...string) error {
 	return nil
 }
 
-// Actor implements port.PlatformActor by shelling out to the wt binary.
+// Actor implements port.PlatformActor by shelling out to the wt and mo binaries.
 type Actor struct {
 	wtBinary string
+	moBinary string
 }
 
-// NewActor constructs an Actor using the given binary name for the wt CLI.
-// The binary must be discoverable on PATH at call time.
-func NewActor(wtBinary string) *Actor {
-	return &Actor{wtBinary: wtBinary}
+// NewActor constructs an Actor using the given binary names for the wt and mo CLIs.
+// Both binaries must be discoverable on PATH at call time.
+func NewActor(wtBinary, moBinary string) *Actor {
+	return &Actor{wtBinary: wtBinary, moBinary: moBinary}
 }
 
 // compile-time check: Actor must satisfy port.PlatformActor.
@@ -66,4 +67,12 @@ func (a *Actor) TeardownWorktree(ctx context.Context, figura, jiraKey string) er
 // running `wt create <figura> <jiraKey>`.
 func (a *Actor) CreateWorktree(ctx context.Context, figura, jiraKey string) error {
 	return runCmd(ctx, a.wtBinary, "create", figura, jiraKey)
+}
+
+// ExecuteMerge runs `mo execute --yes` to merge all ready worktree branches
+// into the base branch. The --yes flag is required by the mo CLI to confirm
+// the destructive operation; the TUI type-to-confirm gate is the caller-side
+// safety check before this method is invoked.
+func (a *Actor) ExecuteMerge(ctx context.Context) error {
+	return runCmd(ctx, a.moBinary, "execute", "--yes")
 }

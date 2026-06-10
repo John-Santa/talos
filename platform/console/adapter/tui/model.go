@@ -43,6 +43,9 @@ const (
 	ModalModeConfirm ModalMode = iota
 	// ModalModeCreate is the text-input dialog for creating a new worktree.
 	ModalModeCreate
+	// ModalModeExecute is the type-to-confirm dialog for the execute-merge action.
+	// The user must type the base branch name exactly to enable the confirm button.
+	ModalModeExecute
 )
 
 // ─── Key bindings ─────────────────────────────────────────────────────────────
@@ -176,6 +179,14 @@ type Model struct {
 	// CreateJiraKeyInput is the text input for the Jira issue key (TAL-NNN).
 	CreateJiraKeyInput textinput.Model
 
+	// ─── Execute-merge modal ───────────────────────────────────────────────────
+	// ExecuteTokenInput is the text input where the user types the base branch
+	// name to confirm the destructive execute-merge action.
+	ExecuteTokenInput textinput.Model
+	// modalBaseBranch holds the base branch captured from the snapshot when the
+	// execute modal was opened; the typed token must match it exactly to confirm.
+	modalBaseBranch string
+
 	// ─── Toast ─────────────────────────────────────────────────────────────────
 	// Toast is the transient single-line notification shown after an action
 	// completes (success or error). Empty string means no toast is displayed.
@@ -206,6 +217,10 @@ func NewWithActor(agg *service.Aggregator, actor port.PlatformActor) Model {
 	jiraKeyInput.Placeholder = "Jira key (e.g. TAL-19)"
 	jiraKeyInput.CharLimit = 20
 
+	executeTokenInput := textinput.New()
+	executeTokenInput.Placeholder = "type base branch to confirm"
+	executeTokenInput.CharLimit = 64
+
 	return Model{
 		agg:                agg,
 		actor:              actor,
@@ -216,6 +231,7 @@ func NewWithActor(agg *service.Aggregator, actor port.PlatformActor) Model {
 		vp:                 viewport.New(0, 0),
 		CreateFiguraInput:  figuraInput,
 		CreateJiraKeyInput: jiraKeyInput,
+		ExecuteTokenInput:  executeTokenInput,
 	}
 }
 
