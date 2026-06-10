@@ -85,6 +85,42 @@ jobs:
           done
           [ "$missing" -eq 0 ]
 
+  overlap:
+    # Collision guard (HG6): cross the REAL diffs of every OPEN agent PR against the base.
+    # Hard gate — fails the PR when two in-flight PRs touch the same file (verdict BLOCK).
+    # The in-flight set is the OPEN-PR head branches from `gh pr list` (the source of truth for
+    # "what's live"); `ov` stays git-only, so stale squash-merged branches that `git ls-remote`
+    # would surface are excluded by construction. A single in-flight PR (or none) → no pairs → OK.
+    name: Overlap collision guard (HG6)
+    runs-on: ubuntu-latest
+    needs: branch-name
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - name: Build ov
+        working-directory: platform/overlap-guard
+        run: go build -o /tmp/ov ./cmd/ov
+      - name: Fetch in-flight agent branches
+        # The default PR checkout does not bring origin/agent/* remote-tracking refs; ov's
+        # three-dot diff needs them, so widen the refspec explicitly (base ref is already present).
+        run: git fetch origin '+refs/heads/agent/*:refs/remotes/origin/agent/*'
+      - name: Cross open-PR diffs for file collisions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # In-flight set = open PR head branches. Passing it explicitly keeps ov git-only and
+          # excludes stale branches. Empty (no open PRs) → ErrNoClaims → exit 0.
+          BRANCHES=$(gh pr list --state open --json headRefName -q '[.[].headRefName] | join(",")')
+          echo "In-flight branches: ${BRANCHES:-<none>}"
+          /tmp/ov scan --remote --branches "$BRANCHES" --base "origin/${{ github.base_ref }}" --no-fetch
+
   judgment:
     # Archive-scoped gate (HG5): fires ONLY when this PR moves a change folder
     # into openspec/changes/archive/<date>-<slug>/. Feature PRs are NOT gated
