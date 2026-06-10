@@ -7,6 +7,8 @@
 - **Merge ordenado:** de a **un worktree a la vez** contra `develop`, **o** rebase-sobre-`develop`-antes-del-PR.
 - Nunca dos merges concurrentes sin rebase previo.
 - El worktree sin cambios se limpia solo.
+- **Gate de archive (Fase 3+):** un change **no se archiva** sin **Judgment Day APPROVED** (gate duro
+  HG5, enforced en CI sobre el PR de archive). Ver [judgment-day.md](judgment-day.md).
 
 ## Orden de merge
 
