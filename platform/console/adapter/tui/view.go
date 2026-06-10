@@ -13,14 +13,22 @@ func (m Model) View() string {
 	if m.Loading {
 		return m.Theme.Subtle.Render("  loading…")
 	}
+
+	var base string
 	switch m.Layout {
 	case LayoutOverview:
-		return m.viewOverview()
+		base = m.viewOverview()
 	case LayoutHybrid:
-		return m.viewHybrid()
+		base = m.viewHybrid()
 	default:
-		return m.viewWorktreeList()
+		base = m.viewWorktreeList()
 	}
+
+	// Overlay the confirmation modal when active.
+	if m.ModalActive {
+		return m.overlayModal(base)
+	}
+	return base
 }
 
 // ─── Worktree list ────────────────────────────────────────────────────────────
@@ -41,6 +49,12 @@ func (m Model) viewWorktreeList() string {
 	if len(m.Snap.Errors) > 0 {
 		note := m.Theme.Subtle.Render(fmt.Sprintf("  ⚠  %d source(s) degraded — partial data", len(m.Snap.Errors)))
 		b.WriteString(note)
+		b.WriteString("\n")
+	}
+
+	// Toast — transient success/error notification after an action.
+	if m.Toast != "" {
+		b.WriteString(m.renderToast())
 		b.WriteString("\n")
 	}
 
@@ -388,6 +402,55 @@ func (m Model) renderSelectedDetail(width, height int) string {
 	}
 
 	return m.panelStyle(width, height).Render(b.String())
+}
+
+// ─── Toast ────────────────────────────────────────────────────────────────────
+
+// renderToast renders the transient action-result notification line.
+// Success messages (starting with ✓) use StatusOK; errors use Error style.
+func (m Model) renderToast() string {
+	if strings.HasPrefix(m.Toast, "✓") {
+		return m.Theme.StatusOK.Render("  " + m.Toast)
+	}
+	return m.Theme.Error.Render("  " + m.Toast)
+}
+
+// ─── Confirmation modal ───────────────────────────────────────────────────────
+
+// overlayModal renders a centered confirmation dialog box over the base view.
+// It uses lipgloss.Place to center the box both horizontally and vertically.
+func (m Model) overlayModal(base string) string {
+	w := m.effectiveWidth()
+	h := m.Height
+	if h <= 0 {
+		h = 30
+	}
+
+	titleLine := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(colorMauve).
+		Render(m.ModalTitle)
+
+	msgLine := m.Theme.ListItem.Render(m.ModalMessage)
+
+	hint := m.Theme.Subtle.Render("[y/enter] confirm   [n/esc] cancel")
+
+	inner := strings.Join([]string{titleLine, "", msgLine, "", hint}, "\n")
+
+	boxStyle := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(colorLavender).
+		Padding(1, 3).
+		Width(w / 2)
+
+	box := boxStyle.Render(inner)
+
+	// Place the modal box centered over the terminal canvas.
+	// The whitespace fill uses colorBase so the box floats over a dark backdrop.
+	return lipgloss.Place(w+4, h, lipgloss.Center, lipgloss.Center, box,
+		lipgloss.WithWhitespaceChars(" "),
+		lipgloss.WithWhitespaceForeground(colorBase),
+	)
 }
 
 // ─── String helpers ───────────────────────────────────────────────────────────

@@ -18,8 +18,9 @@ import (
 
 func main() {
 	reader := cli.NewReader("wt", "mo", "ov", "ch")
+	actor := cli.NewActor("wt")
 	agg := service.NewAggregator(reader)
-	m := tui.New(agg)
+	m := tui.NewWithActor(agg, actor)
 
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {

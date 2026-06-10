@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/John-Santa/talos/platform/console/port"
 	"github.com/John-Santa/talos/platform/console/service"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -89,6 +90,12 @@ type SnapshotMsg struct {
 	Snap service.Snapshot
 }
 
+// ActionResultMsg is delivered when an async actor command (e.g. TeardownWorktree)
+// completes. Err is nil on success.
+type ActionResultMsg struct {
+	Err error
+}
+
 // TickMsg is delivered on every live-refresh interval. It triggers a background
 // reload and re-arms the next tick.
 type TickMsg struct{}
@@ -106,7 +113,9 @@ func tickCmd(d time.Duration) tea.Cmd {
 // Model is the single Bubbletea Model for the Talos TUI.
 // It holds ALL state; sub-states will be added as screen constants in PR-4+.
 type Model struct {
-	agg    *service.Aggregator
+	agg   *service.Aggregator
+	actor port.PlatformActor
+
 	Snap   service.Snapshot
 	Theme  Theme
 	Width  int
@@ -133,16 +142,43 @@ type Model struct {
 	vp viewport.Model
 	// ViewportYOffset exposes the current scroll offset for testing.
 	ViewportYOffset int
+
+	// ─── Confirmation modal ────────────────────────────────────────────────────
+	// ModalActive is true when the confirmation dialog is displayed.
+	ModalActive bool
+	// ModalTitle is the heading line of the confirmation dialog.
+	ModalTitle string
+	// ModalMessage is the body text of the confirmation dialog.
+	ModalMessage string
+	// modalFigura / modalJiraKey hold the teardown target captured when the
+	// modal was opened so confirm can dispatch the action.
+	modalFigura  string
+	modalJiraKey string
+
+	// ─── Toast ─────────────────────────────────────────────────────────────────
+	// Toast is the transient single-line notification shown after an action
+	// completes (success or error). Empty string means no toast is displayed.
+	// Auto-dismiss timer is deferred to a later slice.
+	Toast string
 }
 
-// New constructs the initial Model connected to agg.
+// New constructs the initial Model connected to agg with no write actor.
 // The model starts in the loading state; the first Init Cmd triggers the async
 // data load.
+//
+// Use NewWithActor when write operations (teardown, merge, etc.) are needed.
 func New(agg *service.Aggregator) Model {
+	return NewWithActor(agg, nil)
+}
+
+// NewWithActor constructs the initial Model connected to agg and actor.
+// actor may be nil — the TUI degrades gracefully (action keys are ignored).
+func NewWithActor(agg *service.Aggregator, actor port.PlatformActor) Model {
 	h := help.New()
 	h.ShowAll = false
 	return Model{
 		agg:       agg,
+		actor:     actor,
 		Theme:     RosePine(),
 		Loading:   true,
 		keys:      defaultKeyMap,
