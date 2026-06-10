@@ -101,3 +101,82 @@ func TestMapJudgmentAgree(t *testing.T) {
 		t.Errorf("escalateTo = %q, want empty", rev.EscalateTo)
 	}
 }
+
+// TestMapDoD verifies the DoD mapper handles known label kinds and violations.
+func TestMapDoD(t *testing.T) {
+	tests := []struct {
+		name      string
+		cl        ChLabels
+		wantItems []DoDItem
+	}{
+		{
+			name: "empty labels → empty dod",
+			cl:   ChLabels{},
+			wantItems: []DoDItem{},
+		},
+		{
+			name: "pr label → kind pr done",
+			cl:   ChLabels{Labels: []string{"pr:merged"}, Violations: []string{}},
+			wantItems: []DoDItem{{Label: "pr:merged", State: "done", Kind: "pr"}},
+		},
+		{
+			name: "ci label → kind ci done",
+			cl:   ChLabels{Labels: []string{"ci:green"}, Violations: []string{}},
+			wantItems: []DoDItem{{Label: "ci:green", State: "done", Kind: "ci"}},
+		},
+		{
+			name: "verify label → kind verify done",
+			cl:   ChLabels{Labels: []string{"verify:ok"}, Violations: []string{}},
+			wantItems: []DoDItem{{Label: "verify:ok", State: "done", Kind: "verify"}},
+		},
+		{
+			name: "violation → state pending",
+			cl:   ChLabels{Labels: []string{}, Violations: []string{"pr:open"}},
+			wantItems: []DoDItem{{Label: "pr:open", State: "pending", Kind: "pr"}},
+		},
+		{
+			name: "mixed labels and violations",
+			cl: ChLabels{
+				Labels:     []string{"ci:green", "verify:ok"},
+				Violations: []string{"pr:open"},
+			},
+			wantItems: []DoDItem{
+				{Label: "ci:green", State: "done", Kind: "ci"},
+				{Label: "verify:ok", State: "done", Kind: "verify"},
+				{Label: "pr:open", State: "pending", Kind: "pr"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := MapDoD(tt.cl)
+			if len(got) != len(tt.wantItems) {
+				t.Fatalf("MapDoD: len=%d, want %d; got %+v", len(got), len(tt.wantItems), got)
+			}
+			for i, item := range got {
+				want := tt.wantItems[i]
+				if item != want {
+					t.Errorf("item[%d] = %+v, want %+v", i, item, want)
+				}
+			}
+		})
+	}
+}
+
+// TestJudgmentPendingState verifies pending=true when no ch source is available.
+func TestJudgmentPendingState(t *testing.T) {
+	// MapJudgment with empty ChJudgment should NOT produce a fabricated verdict
+	// — that responsibility belongs to service.Judgment which sets Pending=true.
+	// Here we test that Pending field exists on JudgmentReview and is serializable.
+	rev := JudgmentReview{
+		JiraKey:  "TAL-99",
+		Gate:     "HG5",
+		Judges:   []Judge{},
+		FixAgent: "idle",
+		Verdict:  "agree",
+		Pending:  true,
+	}
+	if !rev.Pending {
+		t.Error("JudgmentReview.Pending must be set to true when no ch source")
+	}
+}

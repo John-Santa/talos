@@ -54,3 +54,13 @@ type ChJudgment struct {
 	Verdict     string   `json:"verdict"`
 	Violations  []string `json:"violations"`
 }
+
+// ChLabels is the `ch labels --branch <b> --json` output.
+type ChLabels struct {
+	Branch     string   `json:"branch"`
+	JiraKey    string   `json:"jira_key"`
+	Figura     string   `json:"figura"`
+	Verdict    string   `json:"verdict"`
+	Labels     []string `json:"labels"`
+	Violations []string `json:"violations"`
+}

@@ -99,11 +99,12 @@ func BuildSnapshot(wts []WtEntry, plan MoPlan, scan OvScan, ownership map[string
 	items := make([]MergeItem, 0, len(plan.Steps))
 	for _, s := range plan.Steps {
 		items = append(items, MergeItem{
-			N:       s.Position,
-			Agent:   NormalizeFigura(s.Figura),
-			JiraKey: ParseJiraKey(s.Branch),
-			Ahead:   s.CommitsAhead,
-			Ready:   s.PredictedClean,
+			N:             s.Position,
+			Agent:         NormalizeFigura(s.Figura),
+			JiraKey:       ParseJiraKey(s.Branch),
+			Ahead:         s.CommitsAhead,
+			Ready:         s.PredictedClean,
+			ConflictFiles: s.ConflictFiles,
 		})
 	}
 
@@ -133,6 +134,33 @@ func BuildSnapshot(wts []WtEntry, plan MoPlan, scan OvScan, ownership map[string
 		IdleAgents: idleAgents(active),
 		Slots:      Slots{Used: len(worktrees), Total: len(devRoster)},
 	}
+}
+
+// kindFor returns the DoDKind for a label string by prefix.
+func kindFor(label string) string {
+	switch {
+	case strings.HasPrefix(label, "pr"):
+		return "pr"
+	case strings.HasPrefix(label, "ci"):
+		return "ci"
+	case strings.HasPrefix(label, "verify"):
+		return "verify"
+	default:
+		return "pr"
+	}
+}
+
+// MapDoD converts a ChLabels response to a []DoDItem checklist.
+// Labels present → state "done"; violations → state "pending".
+func MapDoD(cl ChLabels) []DoDItem {
+	items := make([]DoDItem, 0, len(cl.Labels)+len(cl.Violations))
+	for _, l := range cl.Labels {
+		items = append(items, DoDItem{Label: l, State: "done", Kind: kindFor(l)})
+	}
+	for _, v := range cl.Violations {
+		items = append(items, DoDItem{Label: v, State: "pending", Kind: kindFor(v)})
+	}
+	return items
 }
 
 // MapJudgment maps `ch judgment --json` to the Judgment Day payload. Per-judge
