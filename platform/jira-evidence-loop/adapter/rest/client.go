@@ -164,7 +164,11 @@ func (c *Client) CreateIssue(ctx context.Context, r evidence.CreateIssueRequest)
 }
 
 // ---------------------------------------------------------------------------
-// Search — POST /rest/api/3/issue/search
+// Search — POST /rest/api/3/search/jql
+//
+// Jira Cloud deprecated the legacy search endpoints; the old /rest/api/3/issue/search
+// path returns HTTP 405. The bounded JQL search lives at /rest/api/3/search/jql and
+// returns the same {"issues":[...]} shape we consume.
 // ---------------------------------------------------------------------------
 
 func (c *Client) Search(ctx context.Context, jql string, maxResults int) ([]evidence.Issue, error) {
@@ -173,7 +177,7 @@ func (c *Client) Search(ctx context.Context, jql string, maxResults int) ([]evid
 		"maxResults": maxResults,
 		"fields":     []string{"summary", "labels"},
 	}
-	req, err := c.newJSONRequest(ctx, http.MethodPost, "/rest/api/3/issue/search", payload)
+	req, err := c.newJSONRequest(ctx, http.MethodPost, "/rest/api/3/search/jql", payload)
 	if err != nil {
 		return nil, err
 	}

@@ -180,8 +180,8 @@ func TestClient_Search_HappyPath(t *testing.T) {
 	if r.Method != http.MethodPost {
 		t.Errorf("method = %q, want POST", r.Method)
 	}
-	if r.URL.Path != "/rest/api/3/issue/search" {
-		t.Errorf("path = %q, want /rest/api/3/issue/search", r.URL.Path)
+	if r.URL.Path != "/rest/api/3/search/jql" {
+		t.Errorf("path = %q, want /rest/api/3/search/jql", r.URL.Path)
 	}
 	assertBasicAuth(t, r)
 }
