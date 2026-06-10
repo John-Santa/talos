@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"time"
 
 	"github.com/John-Santa/talos/platform/console/service"
 	"github.com/charmbracelet/bubbles/help"
@@ -20,11 +21,14 @@ const (
 	LayoutMasterDetail LayoutMode = iota
 	// LayoutOverview shows three panels: worktrees, merge-order, overlap.
 	LayoutOverview
+	// LayoutHybrid combines the overview panels with a detail pane for the
+	// currently-selected worktree. It is the third layout in the cycle.
+	LayoutHybrid
 )
 
-// cycleLayout advances to the next layout, wrapping around.
+// cycleLayout advances to the next layout in the 3-way cycle, wrapping around.
 func cycleLayout(l LayoutMode) LayoutMode {
-	return (l + 1) % 2
+	return (l + 1) % 3
 }
 
 // ─── Key bindings ─────────────────────────────────────────────────────────────
@@ -85,6 +89,18 @@ type SnapshotMsg struct {
 	Snap service.Snapshot
 }
 
+// TickMsg is delivered on every live-refresh interval. It triggers a background
+// reload and re-arms the next tick.
+type TickMsg struct{}
+
+// refreshInterval is the default live-refresh cadence.
+const refreshInterval = 10 * time.Second
+
+// tickCmd returns a Cmd that fires a TickMsg after the given interval.
+func tickCmd(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(time.Time) tea.Msg { return TickMsg{} })
+}
+
 // ─── Model ────────────────────────────────────────────────────────────────────
 
 // Model is the single Bubbletea Model for the Talos TUI.
@@ -98,6 +114,9 @@ type Model struct {
 	Cursor int
 	// Loading is true from construction until the first SnapshotMsg arrives.
 	Loading bool
+	// Refreshing is true while a live-refresh reload is in-flight (armed by
+	// tickCmd). It is cleared when the resulting SnapshotMsg arrives.
+	Refreshing bool
 	// Layout controls which panel arrangement is rendered.
 	Layout LayoutMode
 
@@ -140,12 +159,13 @@ func (m Model) WithSnapshot(snap service.Snapshot) Model {
 	return m
 }
 
-// Init returns the Bubbletea Cmd that launches the TUI (alt-screen) and kicks
-// off the first async snapshot load.
+// Init returns the Bubbletea Cmd that launches the TUI (alt-screen), kicks
+// off the first async snapshot load, and arms the live-refresh tick.
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		tea.EnterAltScreen,
 		loadSnapshot(m.agg),
+		tickCmd(refreshInterval),
 	)
 }
 

@@ -239,6 +239,59 @@ func TestView_WorktreeList_FullHelp_GoldenFile(t *testing.T) {
 	}
 }
 
+// ─── Hybrid layout golden file ────────────────────────────────────────────────
+
+func modelWithHybridState() tui.Model {
+	r := mock.NewPlatformReaderMock()
+	snap := fixedSnapshot()
+	r.WorktreesResult = snap.Worktrees
+	r.MergePlanResult = snap.MergePlan
+	r.OverlapResult = snap.Overlap
+	agg := service.NewAggregator(r)
+	m := tui.New(agg)
+
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = next.(tui.Model)
+
+	next2, _ := m.Update(tui.SnapshotMsg{Snap: snap})
+	m = next2.(tui.Model)
+
+	// Two Tabs: MasterDetail → Overview → Hybrid.
+	next3, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = next3.(tui.Model)
+	next4, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	return next4.(tui.Model)
+}
+
+func TestView_Hybrid_GoldenFile(t *testing.T) {
+	m := modelWithHybridState()
+	if m.Layout != tui.LayoutHybrid {
+		t.Fatalf("precondition: Layout must be LayoutHybrid, got %v", m.Layout)
+	}
+	got := m.View()
+
+	goldenPath := filepath.Join("testdata", "hybrid.golden")
+
+	if *update {
+		if err := os.MkdirAll(filepath.Dir(goldenPath), 0o755); err != nil {
+			t.Fatalf("mkdir testdata: %v", err)
+		}
+		if err := os.WriteFile(goldenPath, []byte(got), 0o644); err != nil {
+			t.Fatalf("write golden: %v", err)
+		}
+		t.Logf("golden file updated: %s", goldenPath)
+		return
+	}
+
+	want, err := os.ReadFile(goldenPath)
+	if err != nil {
+		t.Fatalf("golden file missing — run: go test ./adapter/tui -update\n%v", err)
+	}
+	if got != string(want) {
+		t.Errorf("View() hybrid output does not match golden file %s\n\n--- got ---\n%s\n--- want ---\n%s", goldenPath, got, string(want))
+	}
+}
+
 // ─── MasterDetail golden still matches after new layout code ─────────────────
 
 func TestView_MasterDetail_GoldenStillValid(t *testing.T) {

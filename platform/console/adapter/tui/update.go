@@ -46,6 +46,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SnapshotMsg:
 		m.Snap = msg.Snap
 		m.Loading = false
+		m.Refreshing = false
+		return m, nil
+
+	// ─── Live refresh tick ────────────────────────────────────────────────────
+	case TickMsg:
+		m.Refreshing = true
+		return m, tea.Batch(loadSnapshot(m.agg), tickCmd(refreshInterval))
+
+	// ─── Mouse ────────────────────────────────────────────────────────────────
+	case tea.MouseMsg:
+		switch msg.Button {
+		case tea.MouseButtonWheelDown:
+			m = m.moveCursorDown()
+		case tea.MouseButtonWheelUp:
+			m = m.moveCursorUp()
+		}
 		return m, nil
 	}
 
