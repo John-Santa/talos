@@ -13,6 +13,14 @@ build/
 target/
 *.egg-info/
 
+# Binarios Go compilados de los CLIs (se buildean, no se commitean)
+platform/*/ch
+platform/*/evidence
+platform/*/ov
+platform/*/wt
+platform/*/mo
+platform/*/webapi
+
 # Tests / coverage
 coverage/
 .coverage
