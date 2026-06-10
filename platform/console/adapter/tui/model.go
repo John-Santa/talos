@@ -56,20 +56,24 @@ type keyMap struct {
 	Up           key.Binding
 	Down         key.Binding
 	SwitchLayout key.Binding
+	New          key.Binding
+	Teardown     key.Binding
+	Merge        key.Binding
 	Help         key.Binding
 	Quit         key.Binding
 }
 
 // ShortHelp returns the bindings shown in the compact one-line help bar.
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.SwitchLayout, k.Help, k.Quit}
+	return []key.Binding{k.Up, k.Down, k.New, k.Teardown, k.Merge, k.SwitchLayout, k.Help, k.Quit}
 }
 
 // FullHelp returns all bindings for the expanded help view.
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Up, k.Down},
-		{k.SwitchLayout, k.Help, k.Quit},
+		{k.Up, k.Down, k.SwitchLayout},
+		{k.New, k.Teardown, k.Merge},
+		{k.Help, k.Quit},
 	}
 }
 
@@ -86,6 +90,18 @@ var defaultKeyMap = keyMap{
 	SwitchLayout: key.NewBinding(
 		key.WithKeys("tab"),
 		key.WithHelp("tab", "layout"),
+	),
+	New: key.NewBinding(
+		key.WithKeys("n"),
+		key.WithHelp("n", "new"),
+	),
+	Teardown: key.NewBinding(
+		key.WithKeys("x"),
+		key.WithHelp("x", "teardown"),
+	),
+	Merge: key.NewBinding(
+		key.WithKeys("m"),
+		key.WithHelp("m", "merge"),
 	),
 	Help: key.NewBinding(
 		key.WithKeys("?"),
@@ -112,12 +128,23 @@ type ActionResultMsg struct {
 	Err error
 }
 
+// ToastDismissMsg is the auto-dismiss message for toasts. It carries a sequence
+// id so that a stale timer (fired after a newer toast replaced the old one) does
+// NOT clear the new toast. Only a ToastDismissMsg whose Seq matches the model's
+// current ToastSeq will actually clear the toast.
+type ToastDismissMsg struct {
+	Seq int
+}
+
 // TickMsg is delivered on every live-refresh interval. It triggers a background
 // reload and re-arms the next tick.
 type TickMsg struct{}
 
 // refreshInterval is the default live-refresh cadence.
 const refreshInterval = 10 * time.Second
+
+// toastDuration is how long a toast stays visible before auto-dismiss.
+const toastDuration = 4 * time.Second
 
 // tickCmd returns a Cmd that fires a TickMsg after the given interval.
 func tickCmd(d time.Duration) tea.Cmd {
@@ -190,8 +217,22 @@ type Model struct {
 	// ─── Toast ─────────────────────────────────────────────────────────────────
 	// Toast is the transient single-line notification shown after an action
 	// completes (success or error). Empty string means no toast is displayed.
-	// Auto-dismiss timer is deferred to a later slice.
 	Toast string
+	// ToastSeq is incremented each time a new toast is set. The auto-dismiss
+	// timer carries the seq value captured at the time the toast was set; a
+	// dismiss message whose Seq != current ToastSeq is a no-op (stale timer).
+	ToastSeq int
+}
+
+// ShortHelpBindings exposes the current short-help bindings for testing.
+func (m Model) ShortHelpBindings() []key.Binding {
+	return m.keys.ShortHelp()
+}
+
+// FullHelpBindings exposes the current full-help bindings (all columns) for
+// testing.
+func (m Model) FullHelpBindings() [][]key.Binding {
+	return m.keys.FullHelp()
 }
 
 // New constructs the initial Model connected to agg with no write actor.
