@@ -74,13 +74,21 @@ func (e *ErrRemoteLinkFailed) Unwrap() error { return e.Cause }
 // ---------------------------------------------------------------------------
 
 // RunInput carries all caller-supplied values for a single EvidenceLoop.Run
-// invocation. The service never reads environment variables directly.
+// or RunSteps invocation. The service never reads environment variables
+// directly.
 type RunInput struct {
 	// Identity / ownership
 	Module string
 	Agent  string
 	Change string
 	Phase  string
+
+	// JiraKey is the issue key for phases that operate on an existing issue
+	// (spec, design, tasks, apply, verify, archive). When StepCreate is not
+	// included in the StepSet, JiraKey is used directly as the issue key.
+	// For propose (which includes StepCreate), JiraKey is ignored — the key
+	// is resolved via Search or CreateIssue.
+	JiraKey string
 
 	// Issue content
 	Summary     string
@@ -126,7 +134,8 @@ func NewEvidenceLoop(client port.JiraClient, cfg Config) *EvidenceLoop {
 	return &EvidenceLoop{client: client, cfg: cfg}
 }
 
-// Run executes the 7-step evidence flow and returns the Jira issue key.
+// Run executes the complete 7-step evidence flow and returns the Jira issue
+// key. It is a back-compat wrapper around RunSteps(ctx, in, AllSteps()).
 //
 // Step 0  — Ownership guard (pure, no API call)
 // Step 1  — Idempotent create (JQL Search → reuse or CreateIssue)
@@ -137,119 +146,167 @@ func NewEvidenceLoop(client port.JiraClient, cfg Config) *EvidenceLoop {
 // Step 6  — AddAttachment (fail-loud)
 // Step 7  — Transition → done
 func (l *EvidenceLoop) Run(ctx context.Context, in RunInput) (string, error) {
+	return l.RunSteps(ctx, in, AllSteps())
+}
+
+// RunSteps executes only the steps present in the provided StepSet, in the
+// canonical 0→7 order. Steps absent from the set are skipped entirely.
+//
+// When StepCreate is not included, the issue key must be supplied via
+// in.JiraKey (fail-loud if empty and the steps require it). When StepCreate is
+// included, the key is resolved via Search/CreateIssue and in.JiraKey is
+// ignored.
+func (l *EvidenceLoop) RunSteps(ctx context.Context, in RunInput, steps StepSet) (string, error) {
 	// -----------------------------------------------------------------------
-	// Step 0: Ownership guard — before any API call (REQ-LABEL, Design §D0)
+	// Step 0: Ownership guard — pure, no API call (REQ-LABEL, Design §D0)
 	// -----------------------------------------------------------------------
-	if err := evidence.ValidateOwnership(in.Module, in.Agent, in.OwnershipMap); err != nil {
-		return "", err
+	if steps[StepOwnership] {
+		if err := evidence.ValidateOwnership(in.Module, in.Agent, in.OwnershipMap); err != nil {
+			return "", err
+		}
 	}
 
 	// -----------------------------------------------------------------------
 	// Step 1: Idempotent create (REQ-IDEM)
 	// -----------------------------------------------------------------------
-	jql := fmt.Sprintf(
-		`project = "%s" AND labels = "change:%s" AND labels = "phase:%s" AND labels = "agent:%s"`,
-		l.cfg.ProjectKey, in.Change, in.Phase, in.Agent,
-	)
-	matches, err := l.client.Search(ctx, jql, 2)
-	if err != nil {
-		return "", fmt.Errorf("evidence loop step 1 (search): %w", err)
-	}
-
 	var issueKey string
-	switch len(matches) {
-	case 0:
-		// No existing issue — create one.
-		labels := evidence.LabelSet{
-			{Key: "change", Value: in.Change},
-			{Key: "phase", Value: in.Phase},
-			{Key: "agent", Value: in.Agent},
-			{Key: "module", Value: in.Module},
-		}
-		req := evidence.CreateIssueRequest{
-			ProjectKey:    l.cfg.ProjectKey,
-			ProjectID:     l.cfg.ProjectID,
-			IssueTypeName: l.cfg.IssueTypeName,
-			Summary:       in.Summary,
-			Description:   in.Description,
-			Labels:        labels,
-		}
-		created, err := l.client.CreateIssue(ctx, req)
+	if steps[StepCreate] {
+		jql := fmt.Sprintf(
+			`project = "%s" AND labels = "change:%s" AND labels = "phase:%s" AND labels = "agent:%s"`,
+			l.cfg.ProjectKey, in.Change, in.Phase, in.Agent,
+		)
+		matches, err := l.client.Search(ctx, jql, 2)
 		if err != nil {
-			return "", fmt.Errorf("evidence loop step 1 (create): %w", err)
+			return "", fmt.Errorf("evidence loop step 1 (search): %w", err)
 		}
-		issueKey = created.Key
 
-	case 1:
-		// Exactly one match — reuse it.
-		issueKey = matches[0].Key
-
-	default:
-		// More than one match — data integrity violation.
-		return "", &ErrDuplicateIssue{
-			Change: in.Change,
-			Phase:  in.Phase,
-			Agent:  in.Agent,
-			Count:  len(matches),
+		switch len(matches) {
+		case 0:
+			labels := evidence.LabelSet{
+				{Key: "change", Value: in.Change},
+				{Key: "phase", Value: in.Phase},
+				{Key: "agent", Value: in.Agent},
+				{Key: "module", Value: in.Module},
+			}
+			req := evidence.CreateIssueRequest{
+				ProjectKey:    l.cfg.ProjectKey,
+				ProjectID:     l.cfg.ProjectID,
+				IssueTypeName: l.cfg.IssueTypeName,
+				Summary:       in.Summary,
+				Description:   in.Description,
+				Labels:        labels,
+			}
+			created, err := l.client.CreateIssue(ctx, req)
+			if err != nil {
+				return "", fmt.Errorf("evidence loop step 1 (create): %w", err)
+			}
+			issueKey = created.Key
+		case 1:
+			issueKey = matches[0].Key
+		default:
+			return "", &ErrDuplicateIssue{
+				Change: in.Change,
+				Phase:  in.Phase,
+				Agent:  in.Agent,
+				Count:  len(matches),
+			}
+		}
+	} else {
+		// Steps that skip create must supply an explicit issue key.
+		if needsIssueKey(steps) {
+			if in.JiraKey == "" {
+				return "", fmt.Errorf("evidence loop: JiraKey is required when StepCreate is not included in the step set")
+			}
+			issueKey = in.JiraKey
 		}
 	}
 
 	// -----------------------------------------------------------------------
 	// Step 2: Transition → indeterminate (In Progress)
 	// -----------------------------------------------------------------------
-	if err := l.doTransitionToCategory(ctx, issueKey, StatusCategoryIndeterminate, 0); err != nil {
-		return issueKey, fmt.Errorf("evidence loop step 2 (transition→indeterminate): %w", err)
+	if steps[StepTransitionInProgress] {
+		if err := l.doTransitionToCategory(ctx, issueKey, StatusCategoryIndeterminate, 0); err != nil {
+			return issueKey, fmt.Errorf("evidence loop step 2 (transition→indeterminate): %w", err)
+		}
 	}
 
 	// -----------------------------------------------------------------------
 	// Step 3: AddComment
 	// -----------------------------------------------------------------------
-	if err := l.client.AddComment(ctx, issueKey, in.Comment); err != nil {
-		return issueKey, fmt.Errorf("evidence loop step 3 (comment): %w", err)
+	if steps[StepComment] {
+		if err := l.client.AddComment(ctx, issueKey, in.Comment); err != nil {
+			return issueKey, fmt.Errorf("evidence loop step 3 (comment): %w", err)
+		}
 	}
 
 	// -----------------------------------------------------------------------
 	// Step 4: AddWorklog
 	// -----------------------------------------------------------------------
-	seconds := in.WorklogSeconds
-	if seconds <= 0 {
-		seconds = l.cfg.DefaultWorklogSeconds
-	}
-	worklog := evidence.Worklog{
-		TimeSpentSeconds: seconds,
-		Comment:          in.Comment,
-		Started:          in.WorklogStarted,
-	}
-	if err := l.client.AddWorklog(ctx, issueKey, worklog); err != nil {
-		return issueKey, fmt.Errorf("evidence loop step 4 (worklog): %w", err)
+	if steps[StepWorklog] {
+		seconds := in.WorklogSeconds
+		if seconds <= 0 {
+			seconds = l.cfg.DefaultWorklogSeconds
+		}
+		worklog := evidence.Worklog{
+			TimeSpentSeconds: seconds,
+			Comment:          in.Comment,
+			Started:          in.WorklogStarted,
+		}
+		if err := l.client.AddWorklog(ctx, issueKey, worklog); err != nil {
+			return issueKey, fmt.Errorf("evidence loop step 4 (worklog): %w", err)
+		}
 	}
 
 	// -----------------------------------------------------------------------
 	// Step 5: CreateRemoteLink — FAIL LOUD (REQ-REMOTELINK)
 	// -----------------------------------------------------------------------
-	link := evidence.RemoteLink{
-		PRURL:        in.PRURL,
-		Relationship: l.cfg.RemoteLinkRelationship,
-	}
-	if err := l.client.CreateRemoteLink(ctx, issueKey, link); err != nil {
-		return issueKey, &ErrRemoteLinkFailed{IssueKey: issueKey, Cause: err}
+	if steps[StepRemoteLink] {
+		link := evidence.RemoteLink{
+			PRURL:        in.PRURL,
+			Relationship: l.cfg.RemoteLinkRelationship,
+		}
+		if err := l.client.CreateRemoteLink(ctx, issueKey, link); err != nil {
+			return issueKey, &ErrRemoteLinkFailed{IssueKey: issueKey, Cause: err}
+		}
 	}
 
 	// -----------------------------------------------------------------------
 	// Step 6: AddAttachment — FAIL LOUD (REQ-ATTACH, §7)
 	// -----------------------------------------------------------------------
-	if err := l.client.AddAttachment(ctx, issueKey, in.Attachment); err != nil {
-		return issueKey, &ErrAttachmentFailed{IssueKey: issueKey, Cause: err}
+	if steps[StepAttach] {
+		if err := l.client.AddAttachment(ctx, issueKey, in.Attachment); err != nil {
+			return issueKey, &ErrAttachmentFailed{IssueKey: issueKey, Cause: err}
+		}
 	}
 
 	// -----------------------------------------------------------------------
 	// Step 7: Transition → done
 	// -----------------------------------------------------------------------
-	if err := l.doTransitionToCategory(ctx, issueKey, StatusCategoryDone, 0); err != nil {
-		return issueKey, fmt.Errorf("evidence loop step 7 (transition→done): %w", err)
+	if steps[StepTransitionDone] {
+		if issueKey == "" {
+			return "", fmt.Errorf("evidence loop step 7 (transition→done): JiraKey is required for archive phase")
+		}
+		if err := l.doTransitionToCategory(ctx, issueKey, StatusCategoryDone, 0); err != nil {
+			return issueKey, fmt.Errorf("evidence loop step 7 (transition→done): %w", err)
+		}
 	}
 
 	return issueKey, nil
+}
+
+// needsIssueKey returns true when the step set contains any step that requires
+// an issue key to already exist (i.e. any step other than StepOwnership and
+// StepCreate).
+func needsIssueKey(steps StepSet) bool {
+	for _, s := range []Step{
+		StepTransitionInProgress, StepComment, StepWorklog,
+		StepRemoteLink, StepAttach, StepTransitionDone,
+	} {
+		if steps[s] {
+			return true
+		}
+	}
+	return false
 }
 
 // doTransitionToCategory resolves and applies a transition to the target

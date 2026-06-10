@@ -1,13 +1,21 @@
 // Command evidence is the composition root for the jira-evidence-loop module.
-// It wires Config + rest.Client + service.EvidenceLoop and runs the 7-step
-// Jira evidence flow. Credentials are sourced exclusively from environment
+// It wires Config + client + service.EvidenceLoop and runs the selected steps
+// for a given SDD phase. Credentials are sourced exclusively from environment
 // variables (REQ-AUTH, Design §CLI surface).
 //
 // Usage:
 //
 //	evidence run-loop --change=<name> --phase=<phase> --agent=<agent> \
-//	  --module=<module> --summary=<text> [--pr-url=<url>] \
-//	  [--attach=<path>] [--worklog-seconds=<n>]
+//	  --module=<module> --summary=<text> [--jira-key=<KEY>] \
+//	  [--pr-url=<url>] [--attach=<path>] [--worklog-seconds=<n>] \
+//	  [--dry-run]
+//
+// Environment variables:
+//
+//	JIRA_EMAIL        Jira account email (required unless --dry-run)
+//	JIRA_API_TOKEN    Jira API token    (required unless --dry-run)
+//	JIRA_SITE_URL     Jira site URL     (required)
+//	EVIDENCE_DRY_RUN  Set to "1" to activate dry-run mode
 package main
 
 import (
@@ -16,15 +24,18 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/John-Santa/talos/platform/jira-evidence-loop/adapter/dryrun"
 	"github.com/John-Santa/talos/platform/jira-evidence-loop/adapter/rest"
 	"github.com/John-Santa/talos/platform/jira-evidence-loop/domain/evidence"
 	"github.com/John-Santa/talos/platform/jira-evidence-loop/internal/envfile"
+	"github.com/John-Santa/talos/platform/jira-evidence-loop/port"
 	"github.com/John-Santa/talos/platform/jira-evidence-loop/service"
 )
 
@@ -97,71 +108,144 @@ func mainWorktreeRoot() string {
 // run-loop subcommand
 // ---------------------------------------------------------------------------
 
-func cmdRunLoop(args []string) error {
+// runLoopFlags holds all parsed flags for the run-loop subcommand.
+type runLoopFlags struct {
+	// Identity / ownership
+	Change  string
+	Phase   string
+	Agent   string
+	Module  string
+	JiraKey string
+
+	// Issue content
+	Summary         string
+	DescriptionFile string
+	CommentText     string
+	PRURL           string
+	AttachPath      string
+	WorklogSeconds  int
+
+	// Config override
+	SiteURL string
+
+	// Modes
+	DryRun bool
+}
+
+// parseRunLoopFlags parses the run-loop flag set and validates required flags.
+// It also checks the EVIDENCE_DRY_RUN environment variable as an alternative
+// to --dry-run (Design §D6).
+func parseRunLoopFlags(args []string) (runLoopFlags, error) {
 	fs := flag.NewFlagSet("run-loop", flag.ContinueOnError)
 
-	// Ownership / identity flags.
+	// Identity / ownership flags.
 	change := fs.String("change", "", "Change identifier (required)")
-	phase := fs.String("phase", "", "Phase identifier, e.g. apply (required)")
+	phase := fs.String("phase", "", "SDD phase: propose|spec|design|tasks|apply|verify|archive (required)")
 	agent := fs.String("agent", "", "Agent name, e.g. hermes (required)")
 	module := fs.String("module", "", "Module name, e.g. jira-loop (required)")
+	jiraKey := fs.String("jira-key", "", "Jira issue key for phases that operate on an existing issue (e.g. TAL-42)")
 
 	// Issue content flags.
 	summary := fs.String("summary", "", "Issue summary / title (required)")
 	descriptionFile := fs.String("description-file", "", "Path to ADF JSON description file (optional)")
-	commentText := fs.String("comment", "", "Comment text for step 3 (optional)")
-	prURL := fs.String("pr-url", "", "Pull-request URL for remote link (optional)")
-	attachPath := fs.String("attach", "", "Path to file to attach as evidence (optional)")
+	commentText := fs.String("comment", "", "Comment text for the comment step (optional)")
+	prURL := fs.String("pr-url", "", "Pull-request URL for remote link (verify phase)")
+	attachPath := fs.String("attach", "", "Path to file to attach as evidence (verify phase)")
 	worklogSeconds := fs.Int("worklog-seconds", 0, "Worklog duration in seconds (0 = use Config default)")
 
-	// Config overrides (optional, for non-TAL projects).
-	siteURL := fs.String("site-url", "", "Jira site URL, e.g. https://org.atlassian.net (overrides JIRA_SITE_URL env)")
+	// Config overrides.
+	siteURL := fs.String("site-url", "", "Jira site URL (overrides JIRA_SITE_URL env)")
+
+	// Mode flags.
+	dryRun := fs.Bool("dry-run", false, "Plan and log steps without calling Jira (also: EVIDENCE_DRY_RUN=1)")
 
 	if err := fs.Parse(args); err != nil {
-		return err
+		return runLoopFlags{}, err
+	}
+
+	// EVIDENCE_DRY_RUN=1 activates dry-run even without the flag.
+	if os.Getenv("EVIDENCE_DRY_RUN") == "1" {
+		*dryRun = true
 	}
 
 	// Validate required flags.
-	required := map[string]string{
-		"change":  *change,
-		"phase":   *phase,
-		"agent":   *agent,
-		"module":  *module,
-		"summary": *summary,
+	required := []struct{ name, val string }{
+		{"change", *change},
+		{"phase", *phase},
+		{"agent", *agent},
+		{"module", *module},
+		{"summary", *summary},
 	}
-	for name, val := range required {
-		if val == "" {
-			return fmt.Errorf("flag --%s is required", name)
+	for _, r := range required {
+		if r.val == "" {
+			return runLoopFlags{}, fmt.Errorf("flag --%s is required", r.name)
 		}
 	}
 
-	// Credentials from env only (REQ-AUTH). Non-secret identity (site, project
-	// key, project ID) may come from .talos/project.env (loaded above).
-	email := os.Getenv("JIRA_EMAIL")
-	token := os.Getenv("JIRA_API_TOKEN")
-	if email == "" {
-		return errors.New("JIRA_EMAIL environment variable is not set")
+	return runLoopFlags{
+		Change:          *change,
+		Phase:           *phase,
+		Agent:           *agent,
+		Module:          *module,
+		JiraKey:         *jiraKey,
+		Summary:         *summary,
+		DescriptionFile: *descriptionFile,
+		CommentText:     *commentText,
+		PRURL:           *prURL,
+		AttachPath:      *attachPath,
+		WorklogSeconds:  *worklogSeconds,
+		SiteURL:         *siteURL,
+		DryRun:          *dryRun,
+	}, nil
+}
+
+func cmdRunLoop(args []string) error {
+	flags, err := parseRunLoopFlags(args)
+	if err != nil {
+		return err
 	}
-	if token == "" {
-		return errors.New("JIRA_API_TOKEN environment variable is not set")
+
+	// --phase selects the step preset (Design §D3). Unknown phase = fail-loud.
+	steps, err := service.PhasePreset(flags.Phase)
+	if err != nil {
+		return err
 	}
 
 	// Resolve site URL (flag overrides env).
-	site := *siteURL
+	site := flags.SiteURL
 	if site == "" {
 		site = os.Getenv("JIRA_SITE_URL")
 	}
-	if site == "" {
-		return errors.New("Jira site URL is required: set --site-url or JIRA_SITE_URL env")
+
+	// Credentials from env only (REQ-AUTH).
+	email := os.Getenv("JIRA_EMAIL")
+	token := os.Getenv("JIRA_API_TOKEN")
+
+	// Credential / dry-run gate (Design §D6):
+	//   - --dry-run or EVIDENCE_DRY_RUN=1 → DryRunClient; no token required.
+	//   - Missing token without dry-run    → fail-loud (§7).
+	var client port.JiraClient
+	if flags.DryRun {
+		client = dryrun.NewClient(os.Stdout)
+	} else {
+		if email == "" {
+			return errors.New("JIRA_EMAIL environment variable is not set (use --dry-run for token-free execution)")
+		}
+		if token == "" {
+			return errors.New("JIRA_API_TOKEN environment variable is not set (use --dry-run for token-free execution)")
+		}
+		if site == "" {
+			return errors.New("Jira site URL is required: set --site-url or JIRA_SITE_URL env")
+		}
 	}
 
-	// Build Config seeded from real TAL defaults; caller may override via flags.
+	// Build Config — seeded from TAL defaults; overridden by env/flags.
 	cfg := service.DefaultTALConfig()
-	cfg.SiteURL = site
+	if site != "" {
+		cfg.SiteURL = site
+	}
 	cfg.Credentials = service.Credentials{Email: email, APIToken: token}
 
-	// Override non-secret project identity from env (populated by
-	// .talos/project.env or inherited environment; REQ-IDENT).
 	if v := os.Getenv("JIRA_PROJECT_KEY"); v != "" {
 		cfg.ProjectKey = v
 	}
@@ -169,15 +253,20 @@ func cmdRunLoop(args []string) error {
 		cfg.ProjectID = v
 	}
 
-	validatedCfg, err := service.NewConfig(cfg)
-	if err != nil {
-		return fmt.Errorf("config validation: %w", err)
+	// In dry-run mode skip config validation (credentials are intentionally empty).
+	if !flags.DryRun {
+		validatedCfg, err := service.NewConfig(cfg)
+		if err != nil {
+			return fmt.Errorf("config validation: %w", err)
+		}
+		cfg = validatedCfg
+		client = rest.NewClient(cfg)
 	}
 
 	// Build description ADF (optional file).
 	var description evidence.ADFDocument
-	if *descriptionFile != "" {
-		raw, err := os.ReadFile(*descriptionFile)
+	if flags.DescriptionFile != "" {
+		raw, err := os.ReadFile(flags.DescriptionFile)
 		if err != nil {
 			return fmt.Errorf("reading description file: %w", err)
 		}
@@ -185,26 +274,26 @@ func cmdRunLoop(args []string) error {
 			return fmt.Errorf("parsing description file as ADF JSON: %w", err)
 		}
 	} else {
-		description = evidence.NewADFDocument(*summary)
+		description = evidence.NewADFDocument(flags.Summary)
 	}
 
 	// Build comment ADF.
 	var comment evidence.ADFDocument
-	if *commentText != "" {
-		comment = evidence.NewADFDocument(*commentText)
+	if flags.CommentText != "" {
+		comment = evidence.NewADFDocument(flags.CommentText)
 	} else {
-		comment = evidence.NewADFDocument(fmt.Sprintf("Evidence loop executed for %s/%s by %s", *change, *phase, *agent))
+		comment = evidence.NewADFDocument(fmt.Sprintf("Evidence loop executed for %s/%s by %s", flags.Change, flags.Phase, flags.Agent))
 	}
 
 	// Build attachment (optional).
 	var att evidence.Attachment
-	if *attachPath != "" {
-		data, err := os.ReadFile(*attachPath)
+	if flags.AttachPath != "" {
+		data, err := os.ReadFile(flags.AttachPath)
 		if err != nil {
 			return fmt.Errorf("reading attachment file: %w", err)
 		}
 		att = evidence.Attachment{
-			Filename:    pathBase(*attachPath),
+			Filename:    pathBase(flags.AttachPath),
 			ContentType: "application/octet-stream",
 			Data:        data,
 		}
@@ -213,43 +302,44 @@ func cmdRunLoop(args []string) error {
 	// Worklog started = now (ISO-8601 / Jira format).
 	started := time.Now().UTC().Format("2006-01-02T15:04:05.000+0000")
 
-	// Wire adapter and service.
-	client := rest.NewClient(validatedCfg)
-	loop := service.NewEvidenceLoop(client, validatedCfg)
-
-	// Ownership map: minimal map for the module→agent pair being processed.
-	// Full ownership maps should be injected from team-context/ownership.md
-	// in production usage; this minimal map satisfies the ownership guard for
-	// single-module invocations.
-	ownershipMap := map[string]string{*module: *agent}
+	// Ownership map: minimal map for the module→agent pair.
+	ownershipMap := map[string]string{flags.Module: flags.Agent}
 
 	in := service.RunInput{
-		Module:         *module,
-		Agent:          *agent,
-		Change:         *change,
-		Phase:          *phase,
-		Summary:        *summary,
+		Module:         flags.Module,
+		Agent:          flags.Agent,
+		Change:         flags.Change,
+		Phase:          flags.Phase,
+		JiraKey:        flags.JiraKey,
+		Summary:        flags.Summary,
 		Description:    description,
 		Comment:        comment,
-		PRURL:          *prURL,
+		PRURL:          flags.PRURL,
 		Attachment:     att,
-		WorklogSeconds: *worklogSeconds,
+		WorklogSeconds: flags.WorklogSeconds,
 		WorklogStarted: started,
 		OwnershipMap:   ownershipMap,
 	}
 
 	ctx := context.Background()
-	issueKey, err := loop.Run(ctx, in)
+	issueKey, err := service.NewEvidenceLoop(client, cfg).RunSteps(ctx, in, steps)
 	if err != nil {
 		return fmt.Errorf("evidence loop failed (issue=%s): %w", issueKey, err)
 	}
 
-	fmt.Printf("evidence loop complete: issue=%s\n", issueKey)
+	mode := "live"
+	if flags.DryRun {
+		mode = "dry-run"
+	}
+	_, _ = fmt.Fprintf(dryRunOutput(flags.DryRun), "evidence loop complete [%s]: issue=%s phase=%s\n", mode, issueKey, flags.Phase)
 	return nil
 }
 
+// dryRunOutput returns stdout for dry-run (so the plan is always visible) and
+// stdout for live mode too. Kept as a helper for clarity.
+func dryRunOutput(_ bool) io.Writer { return os.Stdout }
+
 // pathBase returns the last path component (filename) of p.
-// Avoids importing path/filepath to stay lightweight.
 func pathBase(p string) string {
 	for i := len(p) - 1; i >= 0; i-- {
 		if p[i] == '/' || p[i] == '\\' {
