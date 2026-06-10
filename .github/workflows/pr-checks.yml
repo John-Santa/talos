@@ -118,19 +118,30 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # In-flight set = OPEN PR head branches. --limit high so a busy repo never SILENTLY
-          # truncates (gh defaults to 30): a dropped colliding PR would be a false GREEN on a hard gate.
-          BRANCHES=$(gh pr list --state open --limit 1000 --json headRefName -q '[.[].headRefName] | join(",")')
-          echo "In-flight branches: ${BRANCHES:-<none>}"
-          # Fail-closed sentinel: THIS PR is always open, so it MUST appear in the list. If it doesn't,
-          # gh failed / returned a partial-or-empty result — do NOT let that pass as "no collisions"
-          # (an empty --branches would otherwise mean ErrNoClaims → exit 0, silently disabling the gate).
+          # In-flight set = OPEN PRs TARGETING THIS BASE. --base scoping is load-bearing: ov diffs
+          # every head three-dot against origin/<base>, so a PR to a DIFFERENT base (a stacked PR, a
+          # main hotfix) would be mis-diffed and manufacture phantom collisions. Fail loud if gh errors.
+          PRS_JSON=$(gh pr list --state open --base "${{ github.base_ref }}" --limit 1000 --json headRefName) \
+            || { echo "::error::gh pr list failed"; exit 1; }
+          COUNT=$(jq 'length' <<<"$PRS_JSON")
+          # --limit is a hard cap; if we hit it the set may be silently truncated (and the sentinel
+          # below can't detect it — the current PR sorts first and survives the cut). Refuse to pass a
+          # possibly-incomplete collision gate: a dropped colliding PR would be a false GREEN.
+          if [ "$COUNT" -ge 1000 ]; then
+            echo "::error::open-PR count hit the 1000 cap — in-flight set may be truncated; refusing to pass HG6"; exit 1
+          fi
+          BRANCHES=$(jq -r '[.[].headRefName] | join(",")' <<<"$PRS_JSON")
+          echo "In-flight PRs to ${{ github.base_ref }}: ${COUNT} — ${BRANCHES:-<none>}"
+          # Fail-closed sentinel: THIS PR targets this base and is open, so it MUST appear. If not, gh
+          # returned a wrong/partial set — do NOT pass (an empty --branches would mean ErrNoClaims → exit 0).
           case ",$BRANCHES," in
             *",$GITHUB_HEAD_REF,"*) : ;;
-            *) echo "::error::open-PR list missing this PR's branch ($GITHUB_HEAD_REF) — gh pr list failed or truncated"; exit 1 ;;
+            *) echo "::error::open-PR list missing this PR's branch ($GITHUB_HEAD_REF) — refusing to pass HG6"; exit 1 ;;
           esac
-          # HG6 guards agent/*-to-agent/* collisions (branch-name enforces every PR is an agent branch);
-          # ov drops any non-agent head by construction. Drafts count — they still claim files.
+          # SCOPE (HG6): ov keys collisions on agent identity (figura) and skips same-agent pairs per the
+          # overlap-guard spec REQ-VERDICT-2 — two OPEN PRs from the SAME figura on the same file are NOT
+          # flagged here. That is the canonical cross-agent semantics; widening it is a spec change (ZEUS),
+          # not CI wiring. Non-agent heads are dropped by ov (branch-name blocks them from merging anyway).
           /tmp/ov scan --remote --branches "$BRANCHES" --base "origin/${{ github.base_ref }}" --no-fetch
 
   judgment:
