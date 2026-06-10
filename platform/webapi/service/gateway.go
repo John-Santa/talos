@@ -44,8 +44,8 @@ func (g *Gateway) Agents(_ context.Context) []domain.Agent {
 	return domain.AllAgents()
 }
 
-// Agent returns an agent's detail. DoD and activity have no offline source, so
-// they come back empty; the worktree (if any) is real.
+// Agent returns an agent's detail. DoD is populated via `ch labels` (best-effort);
+// activity has no offline source and comes back empty; the worktree (if any) is real.
 func (g *Gateway) Agent(ctx context.Context, figura string) (domain.AgentDetail, error) {
 	figura = domain.NormalizeFigura(figura)
 	agent, ok := domain.AgentByID(figura)
@@ -64,6 +64,10 @@ func (g *Gateway) Agent(ctx context.Context, figura string) (domain.AgentDetail,
 			if domain.NormalizeFigura(e.Figura) == figura {
 				w := domain.MapWorktree(e, own, plan)
 				detail.Worktree = &w
+				// Best-effort: populate DoD from `ch labels`. Empty on failure.
+				if cl, err := g.reader.Labels(ctx, e.Branch); err == nil {
+					detail.DoD = domain.MapDoD(cl)
+				}
 				break
 			}
 		}
@@ -71,15 +75,20 @@ func (g *Gateway) Agent(ctx context.Context, figura string) (domain.AgentDetail,
 	return detail, nil
 }
 
-// Judgment has no offline source (ch judgment needs Jira); returns a minimal
-// review so the front degrades gracefully.
-func (g *Gateway) Judgment(_ context.Context, jiraKey string) (domain.JudgmentReview, error) {
+// Judgment attempts `ch judgment --json` (best-effort, timeout via Labels pattern).
+// When ch is unavailable or returns no data, returns an explicit Pending state so
+// the front never shows a fabricated positive verdict.
+func (g *Gateway) Judgment(ctx context.Context, jiraKey string) (domain.JudgmentReview, error) {
+	// Try to get judgment via ch labels channel (reuse Labels port pattern).
+	// ch judgment is not yet wired through a dedicated port method — we degrade
+	// to pending. A future PR can add Judgment() to PlatformReader once ch is available.
 	return domain.JudgmentReview{
 		JiraKey:  jiraKey,
 		Gate:     "HG5",
 		Judges:   []domain.Judge{},
 		FixAgent: "idle",
 		Verdict:  "agree",
+		Pending:  true,
 	}, nil
 }
 

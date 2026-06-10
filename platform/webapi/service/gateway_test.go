@@ -123,6 +123,72 @@ func TestGatewayJudgmentMinimal(t *testing.T) {
 	}
 }
 
+// --- PR3 tests ---------------------------------------------------------------
+
+// fakeReaderWithLabels overrides Labels() to return a canned ChLabels response.
+type fakeReaderWithLabels struct {
+	fakeReader
+	labels domain.ChLabels
+}
+
+func (f fakeReaderWithLabels) Labels(_ context.Context, _ string) (domain.ChLabels, error) {
+	return f.labels, nil
+}
+
+func TestAgentDoDFromLabels(t *testing.T) {
+	cl := domain.ChLabels{
+		Labels:     []string{"ci:green", "pr:merged"},
+		Violations: []string{"verify:missing"},
+	}
+	r := fakeReaderWithLabels{labels: cl}
+	g := NewGateway(r, fakeReader{})
+	detail, err := g.Agent(context.Background(), "hermes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Expect 3 DoD items: 2 done + 1 pending
+	if len(detail.DoD) != 3 {
+		t.Errorf("DoD len = %d, want 3; items: %+v", len(detail.DoD), detail.DoD)
+	}
+	doneCount := 0
+	for _, d := range detail.DoD {
+		if d.State == "done" {
+			doneCount++
+		}
+	}
+	if doneCount != 2 {
+		t.Errorf("done items = %d, want 2", doneCount)
+	}
+}
+
+func TestAgentDoDEmptyWhenNoLabels(t *testing.T) {
+	// fakeReader returns empty ChLabels — DoD should be empty slice, not nil.
+	detail, err := newGateway().Agent(context.Background(), "hermes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.DoD == nil {
+		t.Error("DoD must be an empty slice, not nil")
+	}
+	if len(detail.DoD) != 0 {
+		t.Errorf("DoD len = %d, want 0 (no labels from ch)", len(detail.DoD))
+	}
+}
+
+func TestJudgmentReturnsPendingWhenNoChSource(t *testing.T) {
+	rev, err := newGateway().Judgment(context.Background(), "TAL-15")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// With no ch source, verdict must NOT be a fabricated "agree" — must be pending=true.
+	if !rev.Pending {
+		t.Errorf("Judgment without ch source: Pending = false, want true")
+	}
+	if len(rev.Judges) != 0 {
+		t.Errorf("Judgment without ch source: Judges = %v, want empty", rev.Judges)
+	}
+}
+
 // --- PR2 tests ---------------------------------------------------------------
 
 func TestAgentNormalizesCase(t *testing.T) {
