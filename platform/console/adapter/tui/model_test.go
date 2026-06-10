@@ -216,3 +216,51 @@ func TestUpdate_CtrlC_ReturnsQuitCmd(t *testing.T) {
 		t.Error("ctrl+c should return a quit Cmd, got nil")
 	}
 }
+
+// ─── (d) Layout toggle via Tab key ───────────────────────────────────────────
+
+func TestUpdate_TabKey_TogglesLayoutToOverview(t *testing.T) {
+	// Precondition: default layout is MasterDetail.
+	m := newModel(nil)
+	if m.Layout != tui.LayoutMasterDetail {
+		t.Fatalf("precondition: default Layout must be LayoutMasterDetail, got %v", m.Layout)
+	}
+
+	m = sendKeyType(m, tea.KeyTab)
+
+	if m.Layout != tui.LayoutOverview {
+		t.Errorf("after Tab: Layout = %v, want LayoutOverview", m.Layout)
+	}
+}
+
+func TestUpdate_TabKey_WrapsBackToMasterDetail(t *testing.T) {
+	// Triangulate: a second Tab from Overview wraps back to MasterDetail.
+	m := newModel(nil)
+
+	m = sendKeyType(m, tea.KeyTab)
+	if m.Layout != tui.LayoutOverview {
+		t.Fatalf("after first Tab: Layout = %v, want LayoutOverview", m.Layout)
+	}
+
+	m = sendKeyType(m, tea.KeyTab)
+	if m.Layout != tui.LayoutMasterDetail {
+		t.Errorf("after second Tab: Layout = %v, want LayoutMasterDetail", m.Layout)
+	}
+}
+
+func TestUpdate_TabKey_CyclesThreeTimes(t *testing.T) {
+	// Triangulate wrap-around over 3 presses.
+	m := newModel(nil)
+
+	sequence := []tui.LayoutMode{
+		tui.LayoutOverview,
+		tui.LayoutMasterDetail,
+		tui.LayoutOverview,
+	}
+	for i, want := range sequence {
+		m = sendKeyType(m, tea.KeyTab)
+		if m.Layout != want {
+			t.Errorf("Tab press %d: Layout = %v, want %v", i+1, m.Layout, want)
+		}
+	}
+}
